@@ -329,6 +329,73 @@ namespace vMenuShared
             WPHackingDevice,
             // MP2024_01 DLC (V 3258)
             WPStunRod,
+            //Addon Weapon
+            WPNavyCrbn, //Addon Weapon
+            WPPrecCrbn, //Addon Weapon
+            WPM4, // Addon Weapon
+            WPMK18, //Addon Weapon
+            WPStunshotgun, //Addon Weapon
+            WPTacticalcarbine, //Addon Weapon
+            WPFBIARB, //Addon Weapon
+            WPProtorifle, //Addon Weapon
+            WPFlashbang, //Addon Weapon
+            WPSmokeGrenade2, //Addon Weapon
+            WPSnubRevolver, //Addon Weapon
+            WPNightstick2, //Addon Weapon
+            WPTaser, //Addon Weapon
+            WPTaserblack, //Addon Weapon
+            WPTaserlapd, //Addon Weapon
+            WPCombatPistol2, //Addon Weapon
+            WPCombatPistol3, //Addon Weapon
+            WPPepperSpray, //Addon Weapon
+            WPAntidote, //Addon Weapon
+            WPCMBTRFL, //Addon Weapon
+            WPMKSMN3, //Addon Weapon
+            WPHK416, //Addon Weapon
+            WPHK416ANPEQ, //Addon Weapon
+            WPStealthCarbine, //Addon Weapon
+            WPM4A1, //Addon Weapon
+            WPM4A2, //Addon Weapon
+            WPM4A3, //Addon Weapon
+            WPM6IC, //Addon Weapon
+            WPXMR, //Addon Weapon
+            WPMossberg, //Addon Weapon
+            WPHK417, //Addon Weapon
+            WPM4A1FM, //Addon Weapon
+            WPColBaton, //Addon Weapon
+            WPLaser, //Addon Weapon
+            WPM4New, //Addon Weapon
+            WPM07, //Addon Weapon
+            WPMTLCBN, //Addon Weapon
+            WPLBRS, //Addon Weapon
+                    //Marko Mods
+            WPG17, //Addon Weapon
+            WPM870, //Addon Weapon
+            WPMK182, //Addon Weapon
+            WPMPX, //Addon Weapon
+            WPPP19, //Addon Weapon
+            WPP320a, //Addon Weapon
+            WPP320b, //Addon Weapon
+                     //M110 Family
+            WPM110, //Addon Weapon
+            WPM1101, //Addon Weapon
+            WPM1102, //Addon Weapon
+                     //FBI Weapons
+            WPM40, //Addon Weapon
+            WPASSNPR, //Addon Weapon
+            WPMP7, //Addon Weapon
+            WPFBI19M, //Addon Weapon
+            WPFBIMK4, //Addon Weapon
+            WPmk18a, //Addon Weapon
+            WPdd11_b, //Addon Weapon
+            WPdd11_od, //Addon Weapon
+            WPdd11_c, //Addon Weapon
+            WPdd14_b, //Addon Weapon
+            WPdd14_od, //Addon Weapon
+            WPdd14_c, //Addon Weapon
+            WPdd16_b, //Addon Weapon
+            WPdd16_od, //Addon Weapon
+            WPdd16_c, //Addon Weapon
             #endregion
 
             // Weapon Loadouts Menu
