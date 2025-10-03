@@ -1,14 +1,17 @@
+using System;
 using System.Collections.Generic;
-
-using CitizenFX.Core;
-
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using MenuAPI;
 using Newtonsoft.Json;
-
+using CitizenFX.Core;
+using static CitizenFX.Core.UI.Screen;
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
 using static vMenuShared.PermissionsManager;
 
-namespace vMenuClient.data
+namespace vMenuClient
 {
     public struct ValidWeapon
     {
@@ -17,48 +20,18 @@ namespace vMenuClient.data
         public Dictionary<string, uint> Components;
         public Permission Perm;
         public string SpawnName;
-        public readonly int GetMaxAmmo
-        {
-            get
-            {
-                var ammo = 0; GetMaxAmmo(Game.PlayerPed.Handle, Hash, ref ammo); return ammo;
-            }
-        }
+        public int GetMaxAmmo { get { int ammo = 0; GetMaxAmmo(Game.PlayerPed.Handle, this.Hash, ref ammo); return ammo; } }
         public int CurrentAmmo;
         public int CurrentTint;
-        public readonly float Accuracy
-        {
-            get
-            {
-                var stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudAccuracy;
-            }
-        }
-        public readonly float Damage
-        {
-            get
-            {
-                var stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudDamage;
-            }
-        }
-        public readonly float Range
-        {
-            get
-            {
-                var stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudRange;
-            }
-        }
-        public readonly float Speed
-        {
-            get
-            {
-                var stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudSpeed;
-            }
-        }
+        public float Accuracy { get { Game.WeaponHudStats stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudAccuracy; } }
+        public float Damage { get { Game.WeaponHudStats stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudDamage; } }
+        public float Range { get { Game.WeaponHudStats stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudRange; } }
+        public float Speed { get { Game.WeaponHudStats stats = new Game.WeaponHudStats(); Game.GetWeaponHudStats(Hash, ref stats); return stats.hudSpeed; } }
     }
 
     public static class ValidWeapons
     {
-        private static readonly List<ValidWeapon> _weaponsList = new();
+        private static List<ValidWeapon> _weaponsList = new List<ValidWeapon>();
 
         public static List<ValidWeapon> WeaponList
         {
@@ -73,26 +46,32 @@ namespace vMenuClient.data
             }
         }
 
-        private static Dictionary<string, string> _components = new();
+
+        private static Dictionary<string, string> _components = new Dictionary<string, string>();
         public static Dictionary<string, string> GetWeaponComponents()
         {
             if (_components.Count == 0)
             {
-                var addons = LoadResourceFile(GetCurrentResourceName(), "config/addons.json") ?? "{}";
+                string addons = LoadResourceFile(GetCurrentResourceName(), "config/addons.json") ?? "{}";
                 _components = weaponComponentNames;
                 try
                 {
                     var addonsFile = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(addons);
-
-                    if (addonsFile.TryGetValue("weapon_components", out var weaponComponents))
+                    if (addonsFile.ContainsKey("weapon_components"))
                     {
-                        foreach (var key in weaponComponents)
+                        foreach (var item in addonsFile["weapon_components"])
                         {
-                            _components[key] = key;
+                            string name = item;
+                            string displayName = GetLabelText(name) ?? name;
+                            int unused = 0;
+                            if (GetWeaponComponentHudStats((uint)GetHashKey(name), ref unused))
+                            {
+                                _components.Add(name, displayName);
+                            }
                         }
                     }
                 }
-                catch (JsonException)
+                catch
                 {
                     Log("[WARNING] The addons.json contains invalid JSON.");
                 }
@@ -100,297 +79,483 @@ namespace vMenuClient.data
             return _components;
         }
 
-        private static void CreateWeaponsList()
+        public static void CreateWeaponsList()
         {
             _weaponsList.Clear();
+            WeaponDetails();
             foreach (var weapon in weaponNames)
             {
-                var realName = weapon.Key;
-                var localizedName = weapon.Value;
-                if (realName == "weapon_unarmed") continue;
-                var hash = (uint)GetHashKey(realName);
-                var componentHashes = new Dictionary<string, uint>();
-                var weaponComponents = GetWeaponComponents();
-                var weaponComponentKeys = weaponComponents.Keys;
-                foreach (var comp in weaponComponentKeys)
+                if (!string.IsNullOrEmpty(weapon.Key) && !string.IsNullOrEmpty(weapon.Value))
                 {
-                    var componentHash = (uint)GetHashKey(comp);
-                    if (DoesWeaponTakeWeaponComponent(hash, componentHash))
+                    string realName = weapon.Key;
+                    string localizedName = weapon.Value;
+                    if (realName != "weapon_unarmed")
                     {
-                        var componentName = weaponComponents[comp];
-                        if (!componentHashes.ContainsKey(componentName))
+                        uint hash = (uint)GetHashKey(weapon.Key);
+                        Dictionary<string, uint> componentHashes = new Dictionary<string, uint>();
+                        foreach (var comp in GetWeaponComponents().Keys)
                         {
-                            componentHashes[componentName] = componentHash;
+                            if (DoesWeaponTakeWeaponComponent(hash, (uint)GetHashKey(comp)))
+                            {
+                                if (!componentHashes.ContainsKey(GetWeaponComponents()[comp]))
+                                {
+                                    componentHashes.Add(GetWeaponComponents()[comp], (uint)GetHashKey(comp));
+                                }
+                            }
+                        }
+                        ValidWeapon vw = new ValidWeapon()
+                        {
+                            Hash = hash,
+                            SpawnName = realName,
+                            Name = localizedName,
+                            Components = componentHashes,
+                            Perm = weaponPermissions[realName]
+                        };
+                        if (!_weaponsList.Contains(vw))
+                        {
+                            _weaponsList.Add(vw);
                         }
                     }
-                }
-                var vw = new ValidWeapon
-                {
-                    Hash = hash,
-                    SpawnName = realName,
-                    Name = localizedName,
-                    Components = componentHashes,
-                    Perm = weaponPermissions[realName]
-                };
-                if (!_weaponsList.Contains(vw))
-                {
-                    _weaponsList.Add(vw);
+
+
                 }
             }
         }
 
         #region Weapon names, hashes and localized names (+ all components & tints).
         #region weapon descriptions & names
-        public static readonly Dictionary<string, string> weaponDescriptions = new()
+        public static Dictionary<string, string> weaponDescriptions = new Dictionary<string, string>()
         {
-            { "weapon_advancedrifle", GetLabelText("WTD_RIFLE_ADV") },
-            { "weapon_appistol", GetLabelText("WTD_PIST_AP") },
-            { "weapon_assaultrifle", GetLabelText("WTD_RIFLE_ASL") },
-            { "weapon_assaultrifle_mk2", GetLabelText("WTD_RIFLE_ASL2") },
-            { "weapon_assaultshotgun", GetLabelText("WTD_SG_ASL") },
-            { "weapon_assaultsmg", GetLabelText("WTD_SMG_ASL") },
-            { "weapon_autoshotgun", GetLabelText("WTD_AUTOSHGN") },
-            { "weapon_bat", GetLabelText("WTD_BAT") },
-            { "weapon_ball", GetLabelText("WT_BALL") + "."},
-            { "weapon_battleaxe", GetLabelText("WTD_BATTLEAXE") },
-            { "weapon_bottle", GetLabelText("WTD_BOTTLE") },
-            { "weapon_bullpuprifle", GetLabelText("WTD_BULLRIFLE") },
-            { "weapon_bullpuprifle_mk2", GetLabelText("WTD_BULLRIFLE2") },
-            { "weapon_bullpupshotgun", GetLabelText("WTD_SG_BLP") },
-            { "weapon_bzgas", GetLabelText("WT_BZGAS") + "."},
-            { "weapon_carbinerifle", GetLabelText("WTD_RIFLE_CBN") },
-            { "weapon_carbinerifle_mk2", GetLabelText("WTD_RIFLE_CBN2") },
-            { "weapon_combatmg", GetLabelText("WTD_MG_CBT") },
-            { "weapon_combatmg_mk2", GetLabelText("WTD_MG_CBT2") },
-            { "weapon_combatpdw", GetLabelText("WTD_COMBATPDW") },
-            { "weapon_combatpistol", GetLabelText("WTD_PIST_CBT") },
-            { "weapon_compactlauncher", GetLabelText("WTD_CMPGL") },
-            { "weapon_compactrifle", GetLabelText("WTD_CMPRIFLE") + "~n~" }, // this one is just too short to line-break properly, so we force another empty line
-            { "weapon_crowbar", GetLabelText("WTD_CROWBAR") },
-            { "weapon_dagger", GetLabelText("WTD_DAGGER") },
-            { "weapon_dbshotgun", GetLabelText("WTD_DBSHGN") },
-            { "weapon_doubleaction", GetLabelText("WTD_REV_DA") },
-            { "weapon_fireextinguisher", GetLabelText("WT_FIRE") + "." },
-            { "weapon_firework", GetLabelText("WT_FWRKLNCHR") + "." },
-            { "weapon_flare", GetLabelText("WT_FLARE") + "." },
-            { "weapon_flaregun", GetLabelText("WTD_FLAREGUN") },
-            { "weapon_flashlight", GetLabelText("WTD_FLASHLIGHT") },
-            { "weapon_golfclub", GetLabelText("WTD_GOLFCLUB") },
-            { "weapon_grenade", GetLabelText("WTD_GNADE") },
-            { "weapon_grenadelauncher", GetLabelText("WTD_GL") },
-            { "weapon_gusenberg", GetLabelText("WTD2_GUSNBRG") },
-            { "weapon_hammer", GetLabelText("WTD_HAMMER") },
-            { "weapon_hatchet", GetLabelText("WTD_HATCHET") },
-            { "weapon_heavypistol", GetLabelText("WTD2_HVYPISTOL") },
-            { "weapon_heavyshotgun", GetLabelText("WTD2_HVYSHGN") },
-            { "weapon_heavysniper", GetLabelText("WTD_SNIP_HVY") },
-            { "weapon_heavysniper_mk2", GetLabelText("WTD_SNIP_HVY2") },
-            { "weapon_hominglauncher", GetLabelText("WTD_HOMLNCH") },
-            { "weapon_knife", GetLabelText("WTD_KNIFE") },
-            { "weapon_knuckle", GetLabelText("WTD_KNUCKLE") },
-            { "weapon_machete", GetLabelText("WTD_MACHETE") },
-            { "weapon_machinepistol", GetLabelText("WTD_MCHPIST") },
-            { "weapon_marksmanpistol", GetLabelText("WTD_MKPISTOL") },
-            { "weapon_marksmanrifle", GetLabelText("WTD_MKRIFLE") },
-            { "weapon_marksmanrifle_mk2", GetLabelText("WTD_MKRIFLE2") },
-            { "weapon_mg", GetLabelText("WTD_MG") },
-            { "weapon_microsmg", GetLabelText("WTD_SMG_MCR") },
-            { "weapon_minigun", GetLabelText("WTD_MINIGUN") },
-            { "weapon_minismg", GetLabelText("WTD_MINISMG") },
-            { "weapon_molotov", GetLabelText("WTD_MOLOTOV") },
-            { "weapon_musket", GetLabelText("WTD_MUSKET") },
-            { "weapon_nightstick", GetLabelText("WTD_NGTSTK") },
-            { "weapon_petrolcan", GetLabelText("WTD_PETROL") },
-            { "weapon_pipebomb", GetLabelText("WTD_PIPEBOMB") },
-            { "weapon_pistol", GetLabelText("WT_PIST_DESC") },
-            { "weapon_pistol50", GetLabelText("WTD_PIST_50") },
-            { "weapon_pistol_mk2", GetLabelText("WTD_PIST2") },
-            { "weapon_poolcue", GetLabelText("WTD_POOLCUE") },
-            { "weapon_proxmine", GetLabelText("WTD_PRXMINE") },
-            { "weapon_pumpshotgun", GetLabelText("WTD_SG_PMP") },
-            { "weapon_pumpshotgun_mk2", GetLabelText("WTD_SG_PMP2") },
-            { "weapon_railgun", GetLabelText("WTD_RAILGUN") },
-            { "weapon_revolver", GetLabelText("WTD_REVOLVER") },
-            { "weapon_revolver_mk2", GetLabelText("WTD_REVOLVER2") },
-            { "weapon_rpg", GetLabelText("WTD_RPG") },
-            { "weapon_sawnoffshotgun", GetLabelText("WTD_SG_SOF") },
-            { "weapon_smg", GetLabelText("WTD_SMG") },
-            { "weapon_smg_mk2", GetLabelText("WTD_SMG2") },
-            { "weapon_smokegrenade", GetLabelText("WTD_GNADE_SMK") },
-            { "weapon_sniperrifle", GetLabelText("WTD_SNIP_RIF") },
-            { "weapon_snowball", GetLabelText("WT_SNWBALL") + "." },
-            { "weapon_snspistol", GetLabelText("WTD_SNSPISTOL") },
-            { "weapon_snspistol_mk2", GetLabelText("WTD_SNSPISTOL2") },
-            { "weapon_specialcarbine", GetLabelText("WTD_SPCARBINE") },
-            { "weapon_specialcarbine_mk2", GetLabelText("WTD_SPCARBINE2") },
-            { "weapon_stickybomb", GetLabelText("WTD_GNADE_STK") },
-            { "weapon_stungun", GetLabelText("WTD_STUN") },
-            { "weapon_switchblade", GetLabelText("WTD_SWBLADE") },
-            { "weapon_unarmed", GetLabelText("WTD_UNARMED") },
-            { "weapon_vintagepistol", GetLabelText("WTD_VPISTOL") },
-            { "weapon_wrench", GetLabelText("WTD_WRENCH") },
-            { "weapon_raypistol", GetLabelText("WTD_RAYPISTOL") },
-            { "weapon_raycarbine", GetLabelText("WTD_RAYCARBINE") },
-            { "weapon_rayminigun", GetLabelText("WTD_RAYMINIGUN") },
-            { "weapon_stone_hatchet", GetLabelText("WTD_SHATCHET") },
-            // MPHEIST3 DLC (v 1868)
-            { "weapon_ceramicpistol", GetLabelText("WTD_CERPST") },
-            { "weapon_navyrevolver", GetLabelText("WTD_REV_NV") },
-            { "weapon_hazardcan", GetLabelText("WTD_HAZARDCAN") },
-            // MPHEIST4 DLC (v 2189)
-            { "weapon_gadgetpistol", GetLabelText("WTD_GDGTPST") },
-            { "weapon_militaryrifle", GetLabelText("WTD_MLTRYRFL") },
-            { "weapon_combatshotgun", GetLabelText("WTD_CMBSHGN") },
-            // MPSECURITY DLC (v 2545)
-            { "weapon_emplauncher", GetLabelText("WTD_EMPL") },
-            { "weapon_heavyrifle", GetLabelText("WTD_HEAVYRIFLE") },
-            { "weapon_fertilizercan", GetLabelText("WTD_FERTILIZERCAN") },
-            { "weapon_stungun_mp", GetLabelText("WTD_STNGUNMP") },
-            // MPSUM2 DLC (V 2699)
-            { "weapon_tacticalrifle", GetLabelText("WTD_TACRIFLE") },
-            { "weapon_precisionrifle", GetLabelText("WTD_PRCSRIFLE") },
-            // MPCHRISTMAS3 DLC (V 2802)
-            { "weapon_pistolxm3", GetLabelText("WTD_PISTOLXM3") },
-            { "weapon_candycane", GetLabelText("WTD_CANDYCANE") },
-            { "weapon_railgunxm3", GetLabelText("WTD_RAILGUNXM3") },
-            // MP2023_01 DLC (V 2944)
-            { "weapon_tecpistol", GetLabelText("WTD_TECPISTOL") },
-            // MP2023_02 DLC (V 3095)
-            { "weapon_battlerifle", GetLabelText("WTD_BATTLERIFLE") },
-            { "weapon_snowlauncher", GetLabelText("WTD_SNOWLNCHR") },
-            // MP2024_01 DLC (V 3258)
-            { "weapon_stunrod", GetLabelText("WTD_STUNROD") },
+                { "weapon_advancedrifle", GetLabelText("WT_RIFLE_ADV") },
+                { "weapon_appistol", "Glock18-/AP Pistol" },
+                { "weapon_m9", "M9 Handgun" },
+                { "weapon_assaultrifle", GetLabelText("WT_RIFLE_ASL") },
+                { "weapon_assaultrifle_mk2", GetLabelText("WT_RIFLE_ASL2") },
+                { "weapon_assaultshotgun", GetLabelText("WT_SG_ASL") },
+                { "weapon_assaultsmg", GetLabelText("WT_SMG_ASL") },
+                { "weapon_autoshotgun", GetLabelText("WT_AUTOSHGN") },
+                { "weapon_bat", GetLabelText("WT_BAT") },
+                { "weapon_ball", GetLabelText("WT_BALL") },
+                { "weapon_battleaxe", GetLabelText("WT_BATTLEAXE") },
+                { "weapon_bottle", GetLabelText("WT_BOTTLE") },
+                { "weapon_bullpuprifle", GetLabelText("WT_BULLRIFLE") },
+                { "weapon_bullpuprifle_mk2", GetLabelText("WT_BULLRIFLE2") },
+                { "weapon_bullpupshotgun", GetLabelText("WT_SG_BLP") },
+                { "weapon_bzgas", GetLabelText("WT_BZGAS") },
+                { "weapon_carbinerifle", GetLabelText("WT_RIFLE_CBN") },
+                { "weapon_carbinerifle_mk2", GetLabelText("WT_RIFLE_CBN2") },
+                { "weapon_combatmg", GetLabelText("WT_MG_CBT") },
+                { "weapon_combatmg_mk2", GetLabelText("WT_MG_CBT2") },
+                { "weapon_combatpdw", GetLabelText("WT_COMBATPDW") },
+                { "weapon_combatpistol", GetLabelText("WT_PIST_CBT") },
+                { "weapon_compactlauncher", GetLabelText("WT_CMPGL") },
+                { "weapon_compactrifle", GetLabelText("WT_CMPRIFLE")},
+                { "weapon_crowbar", GetLabelText("WT_CROWBAR") },
+                { "weapon_dagger", GetLabelText("WT_DAGGER") },
+                { "weapon_dbshotgun", GetLabelText("WT_DBSHGN") },
+                { "weapon_doubleaction", GetLabelText("WT_REV_DA") },
+                { "weapon_fireextinguisher", GetLabelText("WT_FIRE") },
+                { "weapon_digiscanner", GetLabelText("WT_DIGI") },
+                { "weapon_firework", GetLabelText("WT_FWRKLNCHR") },
+                { "weapon_flare", GetLabelText("WT_FLARE") },
+                { "weapon_flaregun", GetLabelText("WT_FLAREGUN") },
+                { "weapon_flashlight", GetLabelText("WT_FLASHLIGHT") },
+                { "weapon_golfclub", GetLabelText("WT_GOLFCLUB") },
+                { "weapon_grenade", GetLabelText("WT_GNADE") },
+                { "weapon_grenadelauncher", "40 Mike Mike" },
+                { "weapon_gusenberg", GetLabelText("WT_GUSENBERG") },
+                { "weapon_hammer", GetLabelText("WT_HAMMER") },
+                { "weapon_hatchet", GetLabelText("WT_HATCHET") },
+                { "weapon_heavypistol", GetLabelText("WT_HEAVYPSTL") },
+                { "weapon_heavyshotgun", GetLabelText("WT_HVYSHOT") },
+                { "weapon_heavysniper", GetLabelText("WT_SNIP_HVY") },
+                { "weapon_heavysniper_mk2", GetLabelText("WT_SNIP_HVY2") },
+                { "weapon_hominglauncher", GetLabelText("WT_HOMLNCH") },
+                { "weapon_knife", GetLabelText("WT_KNIFE") },
+                { "weapon_knuckle", GetLabelText("WT_KNUCKLE") },
+                { "weapon_machete", GetLabelText("WT_MACHETE") },
+                { "weapon_machinepistol", GetLabelText("WT_MCHPIST") },
+                { "weapon_marksmanpistol", GetLabelText("WT_MKPISTOL") },
+                { "weapon_marksmanrifle", GetLabelText("WT_MKRIFLE") },
+                { "weapon_marksmanrifle_mk2", GetLabelText("WT_MKRIFLE2") },
+                { "weapon_mg", GetLabelText("WT_MG") },
+                { "weapon_microsmg", GetLabelText("WT_SMG_MCR") },
+                { "weapon_minigun", "The Motherfucker" },
+                { "weapon_minismg", GetLabelText("WT_MINISMG") },
+                { "weapon_molotov", GetLabelText("WT_MOLOTOV") },
+                { "weapon_musket", GetLabelText("WT_MUSKET") },
+                { "weapon_nightstick", GetLabelText("WT_NGTSTK") },
+                { "weapon_petrolcan", GetLabelText("WT_PETROL") },
+                { "weapon_pipebomb", GetLabelText("WT_PIPEBOMB") },
+                { "weapon_pistol", GetLabelText("WT_PIST") },
+                { "weapon_pistol50", GetLabelText("WT_PIST_50") },
+                { "weapon_pistol_mk2", GetLabelText("WT_PIST2") },
+                { "weapon_poolcue", GetLabelText("WT_POOLCUE") },
+                { "weapon_proxmine", GetLabelText("WT_PRXMINE") },
+                { "weapon_pumpshotgun", GetLabelText("WT_SG_PMP") },
+                { "weapon_pumpshotgun_mk2", GetLabelText("WT_SG_PMP2") },
+                { "weapon_railgun", "Shitlord Deterrent" },
+                { "WEAPON_REVOLVER", GetLabelText("WT_REVOLVER") },
+                { "WEAPON_REVOLVER_mk2", GetLabelText("WT_REVOLVER2") },
+                { "weapon_rpg", "Muna's RPG" },
+                { "weapon_stinger", "Javelin" },
+                { "weapon_sawnoffshotgun", GetLabelText("WT_SG_SOF") },
+                { "weapon_smg", GetLabelText("WT_SMG") },
+                { "weapon_smg_mk2", GetLabelText("WT_SMG2") },
+                { "weapon_smokegrenade", GetLabelText("WT_GNADE_SMK") },
+                { "weapon_sniperrifle", GetLabelText("WT_SNIP_RIF") },
+                { "weapon_snowball", GetLabelText("WT_SNWBALL") },
+                { "weapon_snspistol", GetLabelText("WT_SNSPISTOL") },
+                { "weapon_snspistol_mk2", GetLabelText("WT_SNSPISTOL2") },
+                { "weapon_specialcarbine", GetLabelText("WT_RIFLE_SCBN") },
+                { "weapon_specialcarbine_mk2", GetLabelText("WT_SPCARBINE2") },
+                { "weapon_stickybomb", GetLabelText("WT_GNADE_STK") },
+                { "weapon_stungun", "Stun Gun (Civilian)" },
+                { "weapon_switchblade", GetLabelText("WT_SWBLADE") },
+                { "weapon_unarmed", GetLabelText("WT_UNARMED") },
+                { "weapon_vintagepistol", GetLabelText("WT_VPISTOL") },
+                { "weapon_wrench", GetLabelText("WT_WRENCH") },
+                // DLC CHRISTMAS2018 (v 1604)
+                { "weapon_raypistol", GetLabelText("WT_RAYPISTOL") },
+                { "weapon_raycarbine", GetLabelText("WT_RAYCARBINE") },
+                { "weapon_rayminigun", GetLabelText("WT_RAYMINIGUN") },
+                { "weapon_stone_hatchet", GetLabelText("WT_SHATCHET") },
+                // DLC CHRISTMAS2019 (v 1868)
+                { "weapon_ceramicpistol", GetLabelText("WT_CERPST") },
+                { "weapon_navyrevolver", GetLabelText("WT_REV_NV") },
+                //{ "weapon_hazardcan", GetLabelText("WT_") }, (Does not have label text)
+                // DLC CHRISTMAS2020 (v 2189)
+                { "weapon_gadgetpistol", GetLabelText("WT_GDGTPST") },
+                { "weapon_militaryrifle", GetLabelText("WT_MLTRYRFL") },
+                { "weapon_combatshotgun", GetLabelText("WT_CMBSHGN") },
+			    //Security (2545)
+			    {"weapon_emplauncher", GetLabelText("WT_EMPL") },
+                { "weapon_heavyrifle", GetLabelText("WT_HEAVYRIFLE") },
+                { "weapon_stungun_mp", "Stun Gun" },
+			    //MP SUM (2699)
+			    { "weapon_tacticalrifle", GetLabelText("WT_TACRIFLE") },
+                { "weapon_precisionrifle", GetLabelText("WT_PRCSRIFLE") },
+			    // MP Christmas 3 (2802)
+		        { "WEAPON_ACIDPACKAGE", GetLabelText("WT_ACIDPACKAGE") },
+                { "WEAPON_CANDYCANE", GetLabelText("WT_CANDYCANE") },
+                { "WEAPON_PISTOLXM3", GetLabelText("WT_PISTOLXM3") },
+                { "WEAPON_RAILGUNXM3", GetLabelText("WT_RAILGUNXM3") },
+			    // MP 2023 (2944)
+		        { "WEAPON_TECPISTOL", GetLabelText("WT_TECPISTOL") },
+			    // MP 2023 (3095)
+		        { "WEAPON_BATTLERIFLE", GetLabelText("WT_BATTLERIFLE") },
+                { "WEAPON_SNOWLAUNCHER", GetLabelText("WT_SNOWLNCHR") },
+                { "WEAPON_HACKINGDEVICE", GetLabelText("WT_HACKDEVICE") },
+                // MP 2024 (3258)
+                { "WEAPON_STUNROD", GetLabelText("WT_STUNROD") },
+			    //Addon Weapons
+			    { "weapon_navycarbine", "Navy Carbine" },
+                { "weapon_precisioncarbine", "Precision Carbine" },
+                { "weapon_m4", "Colt M4 A1" },
+                { "weapon_mk18b", "MK18B" },
+                { "weapon_stunshotgun", "LAPD Beanbag Shotgun" },
+                { "weapon_tacticalcarbine", "Tactical Carbine" },
+                { "weapon_protorifle", "Prototype Rifle" },
+                { "weapon_fbiarb", "FBI ARB" },
+                { "weapon_flashbang", "Flashbang" },
+                { "weapon_smok2grenade", "Smoke Grenade" },
+                { "weapon_grenadelauncher_smoke", "Smoke Grenade Launcher" },
+                { "weapon_snubrevolver", "Snub Nose Revolver" },
+                { "weapon_pdbeatstick", "LAPD Beating Stick" },
+                { "weapon_taser", "X2 Taser" },
+                { "weapon_taser_black", "X2 Taser (Black)" },
+                { "weapon_taser_lapd", "X2 Taser (LAPD)" },
+                { "weapon_combatpistol2", "Combat Pistol Gen 2" },
+                { "weapon_combatpistol3", "Service Pistol" },
+                { "weapon_pepperspray", "Pepper Spray" },
+                { "WEAPON_ANTIDOTE", "Pepper Spray Antidote" },
+                { "weapon_combatrifle", "Combat Rifle"},
+                { "weapon_scarh", "Scar H" },
+                { "weapon_hk416", "HK416" },
+                { "weapon_hk416_anpeq", "HK416 (Federal Spec)" },
+                { "weapon_stealthcarbine", "Stealth Carbine" },
+                { "weapon_m4a1", "M4A1" },
+                { "weapon_m4a2", "M4A2" },
+                { "weapon_m4a3", "M4A3" },
+                { "WEAPON_M6IC", "LWRC M6IC" },
+                { "WEAPON_VICTUSXMR", "Victus XMR" },
+			    // Marko Mods Weapons
+			    { "weapon_g17", "Glock 17" },
+                { "weapon_m870", "M870" },
+                { "weapon_mk18", "MK18" },
+                { "weapon_mpx", "MPX" },
+                { "weapon_pp19", "PP-19" },
+			    //M110 Family
+			    { "WEAPON_M110", "M110" },
+                { "WEAPON_M110_1", "M110" },
+                { "WEAPON_M110_2", "M110_2" },
+			    //Mossberg
+			    { "WEAPON_MOSSBERG", "Mossberg 590A1" },
+			    //HK417
+			    { "WEAPON_HK417", "HK417 (ACSO Spec)" },
+			    //P320A
+			    { "WEAPON_P320a", "P320A" },
+			    //P320B
+			    { "WEAPON_P320b", "P320B" },
+			    //M4A1FM
+                { "WEAPON_M4A1FM", "M4A1FM" },
+			    //Colbaton
+			    { "WEAPON_COLBATON", "Telescopic Baton" },
+			    //Digiscanner
+			    { "WEAPON_DIGISCANNER", "Digi Scanner" },
+			    //M4 New
+			    { "WEAPON_M4NEW", "M4A1 (New)" },
+			    //M107
+			    { "WEAPON_M107", "Barrett M107" },
+			    //Military Carbine
+			    { "WEAPON_MILITARYCARBINE", "Military Carbine" },
+			    //M40
+			    { "WEAPON_SNIPERRIFLE2", "M40 Sniper Rifle" },
+			    //Assault Sniper
+			    { "WEAPON_ASSAULTSNIPER", "FBI LR25" },
+			    //MP7
+			    { "WEAPON_MP7", "MP7" },
+			    //LBRS
+			    { "WEAPON_LBRS", "LBRS" },
+			    //FBI 19M
+			    { "WEAPON_FBI19M", "FBI Glock 19M" },
+			    //FBI MK4
+			    { "WEAPON_FBIMK4", "FBI MK4" },
+			    //FBI SOG DDM4V7
+			    { "weapon_dd11_b", "SOG DDM4V7 11.5 Black" },
+                { "weapon_dd11_od", "SOG DDM4V7 11.5 OD" },
+                { "weapon_dd11_c", "SOG DDM4V7 11.5 Coyote" },
+                { "weapon_dd14_b", "SOG DDM4V7 14.5 Black" },
+                { "weapon_dd14_od", "SOG DDM4V7 14.5 OD" },
+                { "weapon_dd14_c", "SOG DDM4V7 14.5 Coyote" },
+                { "weapon_dd16_b", "SOG DDM4V7 16 Black" },
+                { "weapon_dd16_od", "SOG DDM4V7 16 OD" },
+                { "weapon_dd16_c", "SOG DDM4V7 16 Coyote" },
         };
 
-        public static readonly Dictionary<string, string> weaponNames = new()
+        // Set weapon names
+        public static void WeaponDetails()
         {
-            { "weapon_advancedrifle", GetLabelText("WT_RIFLE_ADV") },
-            { "weapon_appistol", GetLabelText("WT_PIST_AP") },
-            { "weapon_assaultrifle", GetLabelText("WT_RIFLE_ASL") },
-            { "weapon_assaultrifle_mk2", GetLabelText("WT_RIFLE_ASL2") },
-            { "weapon_assaultshotgun", GetLabelText("WT_SG_ASL") },
-            { "weapon_assaultsmg", GetLabelText("WT_SMG_ASL") },
-            { "weapon_autoshotgun", GetLabelText("WT_AUTOSHGN") },
-            { "weapon_bat", GetLabelText("WT_BAT") },
-            { "weapon_ball", GetLabelText("WT_BALL") },
-            { "weapon_battleaxe", GetLabelText("WT_BATTLEAXE") },
-            { "weapon_bottle", GetLabelText("WT_BOTTLE") },
-            { "weapon_bullpuprifle", GetLabelText("WT_BULLRIFLE") },
-            { "weapon_bullpuprifle_mk2", GetLabelText("WT_BULLRIFLE2") },
-            { "weapon_bullpupshotgun", GetLabelText("WT_SG_BLP") },
-            { "weapon_bzgas", GetLabelText("WT_BZGAS") },
-            { "weapon_carbinerifle", GetLabelText("WT_RIFLE_CBN") },
-            { "weapon_carbinerifle_mk2", GetLabelText("WT_RIFLE_CBN2") },
-            { "weapon_combatmg", GetLabelText("WT_MG_CBT") },
-            { "weapon_combatmg_mk2", GetLabelText("WT_MG_CBT2") },
-            { "weapon_combatpdw", GetLabelText("WT_COMBATPDW") },
-            { "weapon_combatpistol", GetLabelText("WT_PIST_CBT") },
-            { "weapon_compactlauncher", GetLabelText("WT_CMPGL") },
-            { "weapon_compactrifle", GetLabelText("WT_CMPRIFLE")},
-            { "weapon_crowbar", GetLabelText("WT_CROWBAR") },
-            { "weapon_dagger", GetLabelText("WT_DAGGER") },
-            { "weapon_dbshotgun", GetLabelText("WT_DBSHGN") },
-            { "weapon_doubleaction", GetLabelText("WT_REV_DA") },
-            { "weapon_fireextinguisher", GetLabelText("WT_FIRE") },
-            { "weapon_firework", GetLabelText("WT_FWRKLNCHR") },
-            { "weapon_flare", GetLabelText("WT_FLARE") },
-            { "weapon_flaregun", GetLabelText("WT_FLAREGUN") },
-            { "weapon_flashlight", GetLabelText("WT_FLASHLIGHT") },
-            { "weapon_golfclub", GetLabelText("WT_GOLFCLUB") },
-            { "weapon_grenade", GetLabelText("WT_GNADE") },
-            { "weapon_grenadelauncher", GetLabelText("WT_GL") },
-            { "weapon_gusenberg", GetLabelText("WT_GUSENBERG") },
-            { "weapon_hammer", GetLabelText("WT_HAMMER") },
-            { "weapon_hatchet", GetLabelText("WT_HATCHET") },
-            { "weapon_heavypistol", GetLabelText("WT_HEAVYPSTL") },
-            { "weapon_heavyshotgun", GetLabelText("WT_HVYSHOT") },
-            { "weapon_heavysniper", GetLabelText("WT_SNIP_HVY") },
-            { "weapon_heavysniper_mk2", GetLabelText("WT_SNIP_HVY2") },
-            { "weapon_hominglauncher", GetLabelText("WT_HOMLNCH") },
-            { "weapon_knife", GetLabelText("WT_KNIFE") },
-            { "weapon_knuckle", GetLabelText("WT_KNUCKLE") },
-            { "weapon_machete", GetLabelText("WT_MACHETE") },
-            { "weapon_machinepistol", GetLabelText("WT_MCHPIST") },
-            { "weapon_marksmanpistol", GetLabelText("WT_MKPISTOL") },
-            { "weapon_marksmanrifle", GetLabelText("WT_MKRIFLE") },
-            { "weapon_marksmanrifle_mk2", GetLabelText("WT_MKRIFLE2") },
-            { "weapon_mg", GetLabelText("WT_MG") },
-            { "weapon_microsmg", GetLabelText("WT_SMG_MCR") },
-            { "weapon_minigun", GetLabelText("WT_MINIGUN") },
-            { "weapon_minismg", GetLabelText("WT_MINISMG") },
-            { "weapon_molotov", GetLabelText("WT_MOLOTOV") },
-            { "weapon_musket", GetLabelText("WT_MUSKET") },
-            { "weapon_nightstick", GetLabelText("WT_NGTSTK") },
-            { "weapon_petrolcan", GetLabelText("WT_PETROL") },
-            { "weapon_pipebomb", GetLabelText("WT_PIPEBOMB") },
-            { "weapon_pistol", GetLabelText("WT_PIST") },
-            { "weapon_pistol50", GetLabelText("WT_PIST_50") },
-            { "weapon_pistol_mk2", GetLabelText("WT_PIST2") },
-            { "weapon_poolcue", GetLabelText("WT_POOLCUE") },
-            { "weapon_proxmine", GetLabelText("WT_PRXMINE") },
-            { "weapon_pumpshotgun", GetLabelText("WT_SG_PMP") },
-            { "weapon_pumpshotgun_mk2", GetLabelText("WT_SG_PMP2") },
-            { "weapon_railgun", GetLabelText("WT_RAILGUN") },
-            { "weapon_revolver", GetLabelText("WT_REVOLVER") },
-            { "weapon_revolver_mk2", GetLabelText("WT_REVOLVER2") },
-            { "weapon_rpg", GetLabelText("WT_RPG") },
-            { "weapon_sawnoffshotgun", GetLabelText("WT_SG_SOF") },
-            { "weapon_smg", GetLabelText("WT_SMG") },
-            { "weapon_smg_mk2", GetLabelText("WT_SMG2") },
-            { "weapon_smokegrenade", GetLabelText("WT_GNADE_SMK") },
-            { "weapon_sniperrifle", GetLabelText("WT_SNIP_RIF") },
-            { "weapon_snowball", GetLabelText("WT_SNWBALL") },
-            { "weapon_snspistol", GetLabelText("WT_SNSPISTOL") },
-            { "weapon_snspistol_mk2", GetLabelText("WT_SNSPISTOL2") },
-            { "weapon_specialcarbine", GetLabelText("WT_RIFLE_SCBN") },
-            { "weapon_specialcarbine_mk2", GetLabelText("WT_SPCARBINE2") },
-            { "weapon_stickybomb", GetLabelText("WT_GNADE_STK") },
-            { "weapon_stungun", GetLabelText("WT_STUN") },
-            { "weapon_switchblade", GetLabelText("WT_SWBLADE") },
-            { "weapon_unarmed", GetLabelText("WT_UNARMED") },
-            { "weapon_vintagepistol", GetLabelText("WT_VPISTOL") },
-            { "weapon_wrench", GetLabelText("WT_WRENCH") },
-            { "weapon_raypistol", GetLabelText("WT_RAYPISTOL") },
-            { "weapon_raycarbine", GetLabelText("WT_RAYCARBINE") },
-            { "weapon_rayminigun", GetLabelText("WT_RAYMINIGUN") },
-            { "weapon_stone_hatchet", GetLabelText("WT_SHATCHET") },
-            // MPHEIST3 DLC (v 1868)
-            { "weapon_ceramicpistol", GetLabelText("WT_CERPST") },
-            { "weapon_navyrevolver", GetLabelText("WT_REV_NV") },
-            { "weapon_hazardcan", GetLabelText("WT_HAZARDCAN") },
-            // MPHEIST4 DLC (v 2189)
-            { "weapon_gadgetpistol", GetLabelText("WT_GDGTPST") },
-            { "weapon_militaryrifle", GetLabelText("WT_MLTRYRFL") },
-            { "weapon_combatshotgun", GetLabelText("WT_CMBSHGN") },
-            // MPSECURITY DLC (v 2545)
-            { "weapon_emplauncher", GetLabelText("WT_EMPL") },
-            { "weapon_heavyrifle", GetLabelText("WT_HEAVYRIFLE") },
-            { "weapon_fertilizercan", GetLabelText("WT_FERTILIZERCAN") },
-            { "weapon_stungun_mp", GetLabelText("WT_STNGUNMP") },
-            // MPSUM2 DLC (V 2699)
-            { "weapon_tacticalrifle", GetLabelText("WT_TACRIFLE") },
-            { "weapon_precisionrifle", GetLabelText("WT_PRCSRIFLE") },
-            // MPCHRISTMAS3 DLC (V 2802)
-            { "weapon_pistolxm3", GetLabelText("WT_PISTOLXM3") },
-            { "weapon_candycane", GetLabelText("WT_CANDYCANE") },
-            { "weapon_railgunxm3", GetLabelText("WT_RAILGUNXM3") },
-            { "weapon_acidpackage", GetLabelText("WT_ACIDPACKAGE") },
-            // MP2023_01 DLC (V 2944)
-            { "weapon_tecpistol", GetLabelText("WT_TECPISTOL") },
-            // MP2023_02 DLC (V 3095)
-            { "weapon_battlerifle", GetLabelText("WT_BATTLERIFLE") },
-            { "weapon_snowlauncher", GetLabelText("WT_SNOWLNCHR") },
-            { "weapon_hackingdevice", GetLabelText("WT_HACKDEVICE") },
-            // MP2024_01 DLC (V 3258)
-            { "weapon_stunrod", GetLabelText("WT_STUNROD") },
-        };
-        #endregion
+            weaponNames = new Dictionary<string, string>()
+            {
+                { "weapon_advancedrifle", GetLabelText("WT_RIFLE_ADV") },
+                { "weapon_appistol", "Glock18-/AP Pistol" },
+                { "weapon_m9", "M9 Handgun" },
+                { "weapon_assaultrifle", GetLabelText("WT_RIFLE_ASL") },
+                { "weapon_assaultrifle_mk2", GetLabelText("WT_RIFLE_ASL2") },
+                { "weapon_assaultshotgun", GetLabelText("WT_SG_ASL") },
+                { "weapon_assaultsmg", GetLabelText("WT_SMG_ASL") },
+                { "weapon_autoshotgun", GetLabelText("WT_AUTOSHGN") },
+                { "weapon_bat", GetLabelText("WT_BAT") },
+                { "weapon_ball", GetLabelText("WT_BALL") },
+                { "weapon_battleaxe", GetLabelText("WT_BATTLEAXE") },
+                { "weapon_bottle", GetLabelText("WT_BOTTLE") },
+                { "weapon_bullpuprifle", GetLabelText("WT_BULLRIFLE") },
+                { "weapon_bullpuprifle_mk2", GetLabelText("WT_BULLRIFLE2") },
+                { "weapon_bullpupshotgun", GetLabelText("WT_SG_BLP") },
+                { "weapon_bzgas", GetLabelText("WT_BZGAS") },
+                { "weapon_carbinerifle", GetLabelText("WT_RIFLE_CBN") },
+                { "weapon_carbinerifle_mk2", GetLabelText("WT_RIFLE_CBN2") },
+                { "weapon_combatmg", GetLabelText("WT_MG_CBT") },
+                { "weapon_combatmg_mk2", GetLabelText("WT_MG_CBT2") },
+                { "weapon_combatpdw", GetLabelText("WT_COMBATPDW") },
+                { "weapon_combatpistol", GetLabelText("WT_PIST_CBT") },
+                { "weapon_compactlauncher", GetLabelText("WT_CMPGL") },
+                { "weapon_compactrifle", GetLabelText("WT_CMPRIFLE")},
+                { "weapon_crowbar", GetLabelText("WT_CROWBAR") },
+                { "weapon_dagger", GetLabelText("WT_DAGGER") },
+                { "weapon_dbshotgun", GetLabelText("WT_DBSHGN") },
+                { "weapon_doubleaction", GetLabelText("WT_REV_DA") },
+                { "weapon_fireextinguisher", GetLabelText("WT_FIRE") },
+                { "weapon_digiscanner", GetLabelText("WT_DIGI") },
+                { "weapon_firework", GetLabelText("WT_FWRKLNCHR") },
+                { "weapon_flare", GetLabelText("WT_FLARE") },
+                { "weapon_flaregun", GetLabelText("WT_FLAREGUN") },
+                { "weapon_flashlight", GetLabelText("WT_FLASHLIGHT") },
+                { "weapon_golfclub", GetLabelText("WT_GOLFCLUB") },
+                { "weapon_grenade", GetLabelText("WT_GNADE") },
+                { "weapon_grenadelauncher", "40 Mike Mike" },
+                { "weapon_gusenberg", GetLabelText("WT_GUSENBERG") },
+                { "weapon_hammer", GetLabelText("WT_HAMMER") },
+                { "weapon_hatchet", GetLabelText("WT_HATCHET") },
+                { "weapon_heavypistol", GetLabelText("WT_HEAVYPSTL") },
+                { "weapon_heavyshotgun", GetLabelText("WT_HVYSHOT") },
+                { "weapon_heavysniper", GetLabelText("WT_SNIP_HVY") },
+                { "weapon_heavysniper_mk2", GetLabelText("WT_SNIP_HVY2") },
+                { "weapon_hominglauncher", GetLabelText("WT_HOMLNCH") },
+                { "weapon_knife", GetLabelText("WT_KNIFE") },
+                { "weapon_knuckle", GetLabelText("WT_KNUCKLE") },
+                { "weapon_machete", GetLabelText("WT_MACHETE") },
+                { "weapon_machinepistol", GetLabelText("WT_MCHPIST") },
+                { "weapon_marksmanpistol", GetLabelText("WT_MKPISTOL") },
+                { "weapon_marksmanrifle", GetLabelText("WT_MKRIFLE") },
+                { "weapon_marksmanrifle_mk2", GetLabelText("WT_MKRIFLE2") },
+                { "weapon_mg", GetLabelText("WT_MG") },
+                { "weapon_microsmg", GetLabelText("WT_SMG_MCR") },
+                { "weapon_minigun", "The Motherfucker" },
+                { "weapon_minismg", GetLabelText("WT_MINISMG") },
+                { "weapon_molotov", GetLabelText("WT_MOLOTOV") },
+                { "weapon_musket", GetLabelText("WT_MUSKET") },
+                { "weapon_nightstick", GetLabelText("WT_NGTSTK") },
+                { "weapon_petrolcan", GetLabelText("WT_PETROL") },
+                { "weapon_pipebomb", GetLabelText("WT_PIPEBOMB") },
+                { "weapon_pistol", GetLabelText("WT_PIST") },
+                { "weapon_pistol50", GetLabelText("WT_PIST_50") },
+                { "weapon_pistol_mk2", GetLabelText("WT_PIST2") },
+                { "weapon_poolcue", GetLabelText("WT_POOLCUE") },
+                { "weapon_proxmine", GetLabelText("WT_PRXMINE") },
+                { "weapon_pumpshotgun", GetLabelText("WT_SG_PMP") },
+                { "weapon_pumpshotgun_mk2", GetLabelText("WT_SG_PMP2") },
+                { "weapon_railgun", "Shitlord Deterrent" },
+                { "WEAPON_REVOLVER", GetLabelText("WT_REVOLVER") },
+                { "WEAPON_REVOLVER_mk2", GetLabelText("WT_REVOLVER2") },
+                { "weapon_rpg", "Muna's RPG" },
+                { "weapon_stinger", "Javelin" },
+                { "weapon_sawnoffshotgun", GetLabelText("WT_SG_SOF") },
+                { "weapon_smg", GetLabelText("WT_SMG") },
+                { "weapon_smg_mk2", GetLabelText("WT_SMG2") },
+                { "weapon_smokegrenade", GetLabelText("WT_GNADE_SMK") },
+                { "weapon_sniperrifle", GetLabelText("WT_SNIP_RIF") },
+                { "weapon_snowball", GetLabelText("WT_SNWBALL") },
+                { "weapon_snspistol", GetLabelText("WT_SNSPISTOL") },
+                { "weapon_snspistol_mk2", GetLabelText("WT_SNSPISTOL2") },
+                { "weapon_specialcarbine", GetLabelText("WT_RIFLE_SCBN") },
+                { "weapon_specialcarbine_mk2", GetLabelText("WT_SPCARBINE2") },
+                { "weapon_stickybomb", GetLabelText("WT_GNADE_STK") },
+                { "weapon_stungun", "Stun Gun (Civilian)" },
+                { "weapon_switchblade", GetLabelText("WT_SWBLADE") },
+                { "weapon_unarmed", GetLabelText("WT_UNARMED") },
+                { "weapon_vintagepistol", GetLabelText("WT_VPISTOL") },
+                { "weapon_wrench", GetLabelText("WT_WRENCH") },
+                // DLC CHRISTMAS2018 (v 1604)
+                { "weapon_raypistol", GetLabelText("WT_RAYPISTOL") },
+                { "weapon_raycarbine", GetLabelText("WT_RAYCARBINE") },
+                { "weapon_rayminigun", GetLabelText("WT_RAYMINIGUN") },
+                { "weapon_stone_hatchet", GetLabelText("WT_SHATCHET") },
+                // DLC CHRISTMAS2019 (v 1868)
+                { "weapon_ceramicpistol", GetLabelText("WT_CERPST") },
+                { "weapon_navyrevolver", GetLabelText("WT_REV_NV") },
+                //{ "weapon_hazardcan", GetLabelText("WT_") }, (Does not have label text)
+                // DLC CHRISTMAS2020 (v 2189)
+                { "weapon_gadgetpistol", GetLabelText("WT_GDGTPST") },
+                { "weapon_militaryrifle", GetLabelText("WT_MLTRYRFL") },
+                { "weapon_combatshotgun", GetLabelText("WT_CMBSHGN") },
+			    //Security (2545)
+			    {"weapon_emplauncher", GetLabelText("WT_EMPL") },
+                { "weapon_heavyrifle", GetLabelText("WT_HEAVYRIFLE") },
+                { "weapon_stungun_mp", "Stun Gun" },
+			    //MP SUM (2699)
+			    { "weapon_tacticalrifle", GetLabelText("WT_TACRIFLE") },
+                { "weapon_precisionrifle", GetLabelText("WT_PRCSRIFLE") },
+			    // MP Christmas 3 (2802)
+		        { "WEAPON_ACIDPACKAGE", GetLabelText("WT_ACIDPACKAGE") },
+                { "WEAPON_CANDYCANE", GetLabelText("WT_CANDYCANE") },
+                { "WEAPON_PISTOLXM3", GetLabelText("WT_PISTOLXM3") },
+                { "WEAPON_RAILGUNXM3", GetLabelText("WT_RAILGUNXM3") },
+			    // MP 2023 (2944)
+		        { "WEAPON_TECPISTOL", GetLabelText("WT_TECPISTOL") },
+			    // MP 2023 (3095)
+		        { "WEAPON_BATTLERIFLE", GetLabelText("WT_BATTLERIFLE") },
+                { "WEAPON_SNOWLAUNCHER", GetLabelText("WT_SNOWLNCHR") },
+                { "WEAPON_HACKINGDEVICE", GetLabelText("WT_HACKDEVICE") },
+                // MP 2024 (3258)
+                { "WEAPON_STUNROD", GetLabelText("WT_STUNROD") },
+			    //Addon Weapons
+			    { "weapon_navycarbine", "Navy Carbine" },
+                { "weapon_precisioncarbine", "Precision Carbine" },
+                { "weapon_m4", "Colt M4 A1" },
+                { "weapon_mk18b", "MK18B" },
+                { "weapon_stunshotgun", "LAPD Beanbag Shotgun" },
+                { "weapon_tacticalcarbine", "Tactical Carbine" },
+                { "weapon_protorifle", "Prototype Rifle" },
+                { "weapon_fbiarb", "FBI ARB" },
+                { "weapon_flashbang", "Flashbang" },
+                { "weapon_smok2grenade", "Smoke Grenade" },
+                { "weapon_grenadelauncher_smoke", "Smoke Grenade Launcher" },
+                { "weapon_snubrevolver", "Snub Nose Revolver" },
+                { "weapon_pdbeatstick", "LAPD Beating Stick" },
+                { "weapon_taser", "X2 Taser" },
+                { "weapon_taser_black", "X2 Taser (Black)" },
+                { "weapon_taser_lapd", "X2 Taser (LAPD)" },
+                { "weapon_combatpistol2", "Combat Pistol Gen 2" },
+                { "weapon_combatpistol3", "Service Pistol" },
+                { "weapon_pepperspray", "Pepper Spray" },
+                { "WEAPON_ANTIDOTE", "Pepper Spray Antidote" },
+                { "weapon_combatrifle", "Combat Rifle"},
+                { "weapon_scarh", "Scar H" },
+                { "weapon_hk416", "HK416" },
+                { "weapon_hk416_anpeq", "HK416 (PEQ)" },
+                { "weapon_stealthcarbine", "Stealth Carbine" },
+                { "weapon_m4a1", "M4A1" },
+                { "weapon_m4a2", "M4A2" },
+                { "weapon_m4a3", "M4A3" },
+                { "WEAPON_M6IC", "LWRC M6IC" },
+                { "WEAPON_VICTUSXMR", "Victus XMR" },
+			    // Marko Mods Weapons
+			    { "weapon_g17", "Glock 17" },
+                { "weapon_m870", "M870" },
+                { "weapon_mk18", "MK18" },
+                { "weapon_mpx", "MPX" },
+                { "weapon_pp19", "PP-19" },
+			    //M110 Family
+			    { "WEAPON_M110", "M110" },
+                { "WEAPON_M110_1", "M110" },
+                { "WEAPON_M110_2", "M110_2" },
+			    //Mossberg
+			    { "WEAPON_MOSSBERG", "Mossberg 590A1" },
+			    //HK417
+			    { "WEAPON_HK417", "HK417" },
+			    //P320A
+			    { "WEAPON_P320a", "P320A" },
+			    //P320B
+			    { "WEAPON_P320b", "P320B" },
+			    //M4A1FM
+                { "WEAPON_M4A1FM", "M4A1FM" },
+			    //Colbaton
+			    { "WEAPON_COLBATON", "Telescopic Baton" },
+			    //Digiscanner
+			    { "WEAPON_DIGISCANNER", "Digi Scanner" },
+			    //M4 New
+			    { "WEAPON_M4NEW", "M4A1 (New)" },
+			    //M107
+			    { "WEAPON_M107", "Barrett M107" },
+			    //Military Carbine
+			    { "WEAPON_MILITARYCARBINE", "Military Carbine" },
+			    //M40
+			    { "WEAPON_SNIPERRIFLE2", "M40 Sniper Rifle" },
+			    //Assault Sniper
+			    { "WEAPON_ASSAULTSNIPER", "FBI LR25" },
+			    //MP7
+			    { "WEAPON_MP7", "MP7" },
+			    //LBRS
+			    { "WEAPON_LBRS", "LBRS" },
+			    //FBI 19M
+			    { "WEAPON_FBI19M", "FBI Glock 19M" },
+			    //FBI MK4
+			    { "WEAPON_FBIMK4", "FBI MK4" },
+			    //FBI SOG DDM4V7
+			    { "weapon_dd11_b", "SOG DDM4V7 11.5 Black" },
+                { "weapon_dd11_od", "SOG DDM4V7 11.5 OD" },
+                { "weapon_dd11_c", "SOG DDM4V7 11.5 Coyote" },
+                { "weapon_dd14_b", "SOG DDM4V7 14.5 Black" },
+                { "weapon_dd14_od", "SOG DDM4V7 14.5 OD" },
+                { "weapon_dd14_c", "SOG DDM4V7 14.5 Coyote" },
+                { "weapon_dd16_b", "SOG DDM4V7 16 Black" },
+                { "weapon_dd16_od", "SOG DDM4V7 16 OD" },
+                { "weapon_dd16_c", "SOG DDM4V7 16 Coyote" },
+            };
+        }
 
-        #region weapon permissions
-        public static readonly Dictionary<string, Permission> weaponPermissions = new()
+        public static Dictionary<string, string> weaponNames = new Dictionary<string, string>()
+        {
+
+        };
+
+        public static Dictionary<string, Permission> weaponPermissions = new Dictionary<string, Permission>()
         {
             ["weapon_advancedrifle"] = Permission.WPAdvancedRifle,
             ["weapon_appistol"] = Permission.WPAPPistol,
+            ["weapon_m9"] = Permission.WPM9,
             ["weapon_assaultrifle"] = Permission.WPAssaultRifle,
             ["weapon_assaultrifle_mk2"] = Permission.WPAssaultRifleMk2,
             ["weapon_assaultshotgun"] = Permission.WPAssaultShotgun,
@@ -417,6 +582,7 @@ namespace vMenuClient.data
             ["weapon_dbshotgun"] = Permission.WPDoubleBarrelShotgun,
             ["weapon_doubleaction"] = Permission.WPDoubleAction,
             ["weapon_fireextinguisher"] = Permission.WPFireExtinguisher,
+            ["weapon_digiscanner"] = Permission.WPDigiscanner,
             ["weapon_firework"] = Permission.WPFirework,
             ["weapon_flare"] = Permission.WPFlare,
             ["weapon_flaregun"] = Permission.WPFlareGun,
@@ -456,9 +622,10 @@ namespace vMenuClient.data
             ["weapon_pumpshotgun"] = Permission.WPPumpShotgun,
             ["weapon_pumpshotgun_mk2"] = Permission.WPPumpShotgunMk2,
             ["weapon_railgun"] = Permission.WPRailgun,
-            ["weapon_revolver"] = Permission.WPRevolver,
-            ["weapon_revolver_mk2"] = Permission.WPRevolverMk2,
+            ["WEAPON_REVOLVER"] = Permission.WPRevolver,
+            ["WEAPON_REVOLVER_mk2"] = Permission.WPRevolverMk2,
             ["weapon_rpg"] = Permission.WPRPG,
+            ["weapon_stinger"] = Permission.WPSTINGER,
             ["weapon_sawnoffshotgun"] = Permission.WPSawnOffShotgun,
             ["weapon_smg"] = Permission.WPSMG,
             ["weapon_smg_mk2"] = Permission.WPSMGMk2,
@@ -475,53 +642,120 @@ namespace vMenuClient.data
             ["weapon_unarmed"] = Permission.WPUnarmed,
             ["weapon_vintagepistol"] = Permission.WPVintagePistol,
             ["weapon_wrench"] = Permission.WPWrench,
+            // DLC CHRISTMAS2018 (v 1604)
             ["weapon_raypistol"] = Permission.WPPlasmaPistol,
             ["weapon_raycarbine"] = Permission.WPPlasmaCarbine,
             ["weapon_rayminigun"] = Permission.WPPlasmaMinigun,
             ["weapon_stone_hatchet"] = Permission.WPStoneHatchet,
-            // MPHEIST3 DLC (v 1868)
+            // DLC CHRISTMAS2019 (v 1868)
             ["weapon_ceramicpistol"] = Permission.WPCeramicPistol,
             ["weapon_navyrevolver"] = Permission.WPNavyRevolver,
-            ["weapon_hazardcan"] = Permission.WPHazardCan,
-            // MPHEIST4 DLC (v 2189)
+            //["weapon_hazardcan"] = Permission.WPHazardCan, (Does not have label text)
+            // DLC CHRISTMAS2020 (v 2189)
             ["weapon_gadgetpistol"] = Permission.WPPericoPistol,
             ["weapon_militaryrifle"] = Permission.WPMilitaryRifle,
             ["weapon_combatshotgun"] = Permission.WPCombatShotgun,
-            // MPSECURITY DLC (v 2545)
-            ["weapon_emplauncher"] = Permission.WPEMPLauncher,
+            // Security (2545)
             ["weapon_heavyrifle"] = Permission.WPHeavyRifle,
-            ["weapon_fertilizercan"] = Permission.WPFertilizerCan,
             ["weapon_stungun_mp"] = Permission.WPStunGunMP,
-            // MPSUM2 DLC (V 2699)
-            ["weapon_tacticalrifle"] = Permission.WPTacticalRifle,
+            // MP Sum (2699)
+            ["weapon_emplauncher"] = Permission.WPEMPLauncher,
             ["weapon_precisionrifle"] = Permission.WPPrecisionRifle,
-            // MPCHRISTMAS3 DLC (V 2802)
-            ["weapon_pistolxm3"] = Permission.WPPistolXM3,
-            ["weapon_candycane"] = Permission.WPCandyCane,
-            ["weapon_railgunxm3"] = Permission.WPRailgunXM3,
-            ["weapon_acidpackage"] = Permission.WPAcidPackage,
-            // MP2023_01 DLC (V 2944)
-            ["weapon_tecpistol"] = Permission.WPTecPistol,
-            // MP2023_02 DLC (V 3095)
-            ["weapon_battlerifle"] = Permission.WPBattleRifle,
-            ["weapon_snowlauncher"] = Permission.WPSnowLauncher,
-            ["weapon_hackingdevice"] = Permission.WPHackingDevice,
-            // MP2024_01 DLC (V 3258)
-            ["weapon_stunrod"] = Permission.WPStunRod,
+            ["weapon_tacticalrifle"] = Permission.WPTacticalRifle,
+            // MP Christmas 3 (2802)
+            ["WEAPON_ACIDPACKAGE"] = Permission.WPAcidpackage,
+            ["WEAPON_CANDYCANE"] = Permission.WPCandycane,
+            ["WEAPON_PISTOLXM3"] = Permission.WPPistolXM3,
+            ["WEAPON_RAILGUNXM3"] = Permission.WPRAILGUN2,
+            // MP 2023_01 (2944)
+            ["WEAPON_TECPISTOL"] = Permission.WPTecPistol,
+            // MP 2023_02 (3095)
+            ["WEAPON_BATTLERIFLE"] = Permission.WPBattleRifle,
+            ["WEAPON_SNOWLAUNCHER"] = Permission.WPSnowLauncher,
+            ["WEAPON_HACKINGDEVICE"] = Permission.WPHackingDevice,
+            // MP 2024 (3258)
+            ["WEAPON_STUNROD"] = Permission.WPStunRod,
+            //Addon Rifle
+            ["weapon_navycarbine"] = Permission.WPNavyCrbn,
+            ["weapon_precisioncarbine"] = Permission.WPPrecCrbn,
+            ["weapon_m4"] = Permission.WPM4,
+            ["weapon_mk18b"] = Permission.WPMK18,
+            ["weapon_fbiarb"] = Permission.WPFBIARB,
+            ["weapon_stunshotgun"] = Permission.WPStunshotgun,
+            ["weapon_tacticalcarbine"] = Permission.WPTacticalcarbine,
+            ["weapon_protorifle"] = Permission.WPProtorifle,
+            ["weapon_flashbang"] = Permission.WPFlashbang,
+            ["weapon_smok2grenade"] = Permission.WPSmokeGrenade2,
+            ["weapon_grenadelauncher_smoke"] = Permission.WPGrenadeLauncherSmoke,
+            ["weapon_snubrevolver"] = Permission.WPSnubRevolver,
+            ["weapon_pdbeatstick"] = Permission.WPNightstick2,
+            ["weapon_taser"] = Permission.WPTaser,
+            ["weapon_taser_black"] = Permission.WPTaserblack,
+            ["weapon_taser_lapd"] = Permission.WPTaserlapd,
+            ["weapon_combatpistol2"] = Permission.WPCombatPistol2,
+            ["weapon_combatpistol3"] = Permission.WPCombatPistol3,
+            ["weapon_pepperspray"] = Permission.WPPepperSpray,
+            ["WEAPON_ANTIDOTE"] = Permission.WPAntidote,
+            ["weapon_combatrifle"] = Permission.WPCMBTRFL,
+            ["weapon_scarh"] = Permission.WPMKSMN3,
+            ["weapon_hk416"] = Permission.WPHK416,
+            ["weapon_hk416_anpeq"] = Permission.WPHK416ANPEQ,
+            ["weapon_stealthcarbine"] = Permission.WPStealthCarbine,
+            ["weapon_m4a1"] = Permission.WPM4A1,
+            ["weapon_m4a2"] = Permission.WPM4A2,
+            ["weapon_m4a3"] = Permission.WPM4A3,
+            ["WEAPON_M6IC"] = Permission.WPM6IC,
+            ["WEAPON_VICTUSXMR"] = Permission.WPXMR,
+            ["WEAPON_MOSSBERG"] = Permission.WPMossberg,
+            //M110 Family
+            ["WEAPON_M110"] = Permission.WPM110,
+            ["WEAPON_M110_1"] = Permission.WPM1101,
+            ["WEAPON_M110_2"] = Permission.WPM1102,
+            //HK417
+            ["WEAPON_HK417"] = Permission.WPHK417,
+            // Marko Mods Weapons
+            ["weapon_g17"] = Permission.WPG17,
+            ["weapon_m870"] = Permission.WPM870,
+            ["weapon_mk18"] = Permission.WPMK182,
+            ["weapon_mpx"] = Permission.WPMPX,
+            ["weapon_pp19"] = Permission.WPPP19,
+            ["WEAPON_P320a"] = Permission.WPP320a,
+            ["WEAPON_P320b"] = Permission.WPP320b,
+            ["WEAPON_M4A1FM"] = Permission.WPM4A1FM,
+            ["WEAPON_COLBATON"] = Permission.WPColBaton,
+            ["WEAPON_DIGISCANNER"] = Permission.WPLaser,
+            ["WEAPON_M4NEW"] = Permission.WPM4New,
+            ["WEAPON_M107"] = Permission.WPM07,
+            ["WEAPON_MILITARYCARBINE"] = Permission.WPMTLCBN,
+            ["WEAPON_SNIPERRIFLE2"] = Permission.WPM40,
+            ["WEAPON_ASSAULTSNIPER"] = Permission.WPASSNPR,
+            ["WEAPON_MP7"] = Permission.WPMP7,
+            ["WEAPON_LBRS"] = Permission.WPLBRS,
+            ["WEAPON_FBI19M"] = Permission.WPFBI19M,
+            ["WEAPON_FBIMK4"] = Permission.WPFBIMK4,
+            ["weapon_dd11_b"] = Permission.WPdd11_b,
+            ["weapon_dd11_od"] = Permission.WPdd11_od,
+            ["weapon_dd11_c"] = Permission.WPdd11_c,
+            ["weapon_dd14_b"] = Permission.WPdd14_b,
+            ["weapon_dd14_od"] = Permission.WPdd14_od,
+            ["weapon_dd14_c"] = Permission.WPdd14_c,
+            ["weapon_dd16_b"] = Permission.WPdd16_b,
+            ["weapon_dd16_od"] = Permission.WPdd16_od,
+            ["weapon_dd16_c"] = Permission.WPdd16_c,
         };
         #endregion
 
         #region weapon component names
-        private static readonly Dictionary<string, string> weaponComponentNames = new()
+        private static readonly Dictionary<string, string> weaponComponentNames = new Dictionary<string, string>()
         {
-            ["COMPONENT_ADVANCEDRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_ADVANCEDRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_ADVANCEDRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_ADVANCEDRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_ADVANCEDRIFLE_VARMOD_LUXE"] = GetLabelText("WCT_VAR_METAL"),
-            ["COMPONENT_APPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_APPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_APPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_APPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_APPISTOL_VARMOD_LUXE"] = GetLabelText("WCT_VAR_METAL"),
-            ["COMPONENT_ASSAULTRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_ASSAULTRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_ASSAULTRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_ASSAULTRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_ASSAULTRIFLE_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -534,18 +768,20 @@ namespace vMenuClient.data
             ["COMPONENT_ASSAULTRIFLE_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_ASSAULTRIFLE_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_ASSAULTRIFLE_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_ASSAULTSHOTGUN_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_ASSAULTSHOTGUN_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_ASSAULTSMG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_ASSAULTSMG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_ASSAULTSHOTGUN_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_ASSAULTSHOTGUN_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_ASSAULTSMG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_ASSAULTSMG_CLIP_02"] = "Magazine 2",
             ["COMPONENT_ASSAULTSMG_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_GOLD"),
+            ["COMPONENT_STINGER_CLIP_01"] = GetLabelText("WCT_"),
+            ["COMPONENT_AT_AR_AFGRIP_03"] = GetLabelText("WCT_Grip"),
             ["COMPONENT_AT_AR_AFGRIP_02"] = GetLabelText("WCT_GRIP"),
             ["COMPONENT_AT_AR_AFGRIP"] = GetLabelText("WCT_GRIP"),
             ["COMPONENT_AT_AR_BARREL_01"] = GetLabelText("WCT_BARR"),
@@ -594,6 +830,7 @@ namespace vMenuClient.data
             ["COMPONENT_AT_SCOPE_MACRO_MK2"] = GetLabelText("WCT_SCOPE_MAC2"),
             ["COMPONENT_AT_SCOPE_MACRO"] = GetLabelText("WCT_SCOPE_MAC"),
             ["COMPONENT_AT_SCOPE_MAX"] = GetLabelText("WCT_SCOPE_MAX"),
+            ["COMPONENT_AT_SCOPE_MEDIUM_03"] = "Scope",
             ["COMPONENT_AT_SCOPE_MEDIUM_MK2"] = GetLabelText("WCT_SCOPE_MED2"),
             ["COMPONENT_AT_SCOPE_MEDIUM"] = GetLabelText("WCT_SCOPE_LRG"),
             ["COMPONENT_AT_SCOPE_NV"] = GetLabelText("WCT_SCOPE_NV"),
@@ -608,8 +845,8 @@ namespace vMenuClient.data
             ["COMPONENT_AT_SR_BARREL_02"] = GetLabelText("WCT_BARR2"),
             ["COMPONENT_AT_SR_SUPP_03"] = GetLabelText("WCT_SUPP"),
             ["COMPONENT_AT_SR_SUPP"] = GetLabelText("WCT_SUPP"),
-            ["COMPONENT_BULLPUPRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_BULLPUPRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_BULLPUPRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_BULLPUPRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO_04"] = GetLabelText("WCT_CAMO_4"),
@@ -621,15 +858,15 @@ namespace vMenuClient.data
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_BULLPUPRIFLE_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_BULLPUPRIFLE_VARMOD_LOW"] = GetLabelText("WCT_VAR_METAL"),
-            ["COMPONENT_CARBINERIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_CARBINERIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_CARBINERIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_CARBINERIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_CARBINERIFLE_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
             ["COMPONENT_CARBINERIFLE_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_CARBINERIFLE_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -642,15 +879,15 @@ namespace vMenuClient.data
             ["COMPONENT_CARBINERIFLE_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_CARBINERIFLE_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_CARBINERIFLE_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_CARBINERIFLE_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_CARBINERIFLE_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_CARBINERIFLE_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_CARBINERIFLE_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_CARBINERIFLE_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_CARBINERIFLE_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_CARBINERIFLE_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_CARBINERIFLE_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_CARBINERIFLE_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_COMBATMG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_COMBATMG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_COMBATMG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATMG_CLIP_02"] = "Magazine 2",
             ["COMPONENT_COMBATMG_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_COMBATMG_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
             ["COMPONENT_COMBATMG_MK2_CAMO_04"] = GetLabelText("WCT_CAMO_4"),
@@ -662,28 +899,28 @@ namespace vMenuClient.data
             ["COMPONENT_COMBATMG_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_COMBATMG_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_COMBATMG_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_COMBATMG_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_COMBATMG_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_COMBATMG_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATMG_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_COMBATMG_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_COMBATMG_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_COMBATMG_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_COMBATMG_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
-            ["COMPONENT_COMBATPDW_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_COMBATPDW_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_COMBATPDW_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATPDW_CLIP_02"] = "Magazine 2",
             ["COMPONENT_COMBATPDW_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
-            ["COMPONENT_COMBATPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_COMBATPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_COMBATPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_COMBATPISTOL_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_COMPACTRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_COMPACTRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_COMPACTRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMPACTRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_COMPACTRIFLE_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
-            ["COMPONENT_GUSENBERG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_GUSENBERG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_HEAVYPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_HEAVYPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_GUSENBERG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_GUSENBERG_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_HEAVYPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_HEAVYPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_HEAVYPISTOL_VARMOD_LUXE"] = GetLabelText("WCT_VAR_WOOD"),
-            ["COMPONENT_HEAVYSHOTGUN_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_HEAVYSHOTGUN_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_HEAVYSHOTGUN_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_HEAVYSHOTGUN_CLIP_02"] = "Magazine 2",
             ["COMPONENT_HEAVYSHOTGUN_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
             ["COMPONENT_HEAVYSNIPER_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_HEAVYSNIPER_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -696,8 +933,8 @@ namespace vMenuClient.data
             ["COMPONENT_HEAVYSNIPER_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_HEAVYSNIPER_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_HEAVYSNIPER_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_HEAVYSNIPER_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_HEAVYSNIPER_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_HEAVYSNIPER_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_HEAVYSNIPER_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_HEAVYSNIPER_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_HEAVYSNIPER_MK2_CLIP_EXPLOSIVE"] = GetLabelText("WCT_CLIP_EX"),
             ["COMPONENT_HEAVYSNIPER_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
@@ -712,11 +949,11 @@ namespace vMenuClient.data
             ["COMPONENT_KNUCKLE_VARMOD_PIMP"] = GetLabelText("WCT_KNUCK_02"),
             ["COMPONENT_KNUCKLE_VARMOD_PLAYER"] = GetLabelText("WCT_KNUCK_PC"),
             ["COMPONENT_KNUCKLE_VARMOD_VAGOS"] = GetLabelText("WCT_KNUCK_VG"),
-            ["COMPONENT_MACHINEPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MACHINEPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MACHINEPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MACHINEPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MACHINEPISTOL_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
-            ["COMPONENT_MARKSMANRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MARKSMANRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MARKSMANRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MARKSMANRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO_04"] = GetLabelText("WCT_CAMO_4"),
@@ -728,23 +965,23 @@ namespace vMenuClient.data
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_MARKSMANRIFLE_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_MARKSMANRIFLE_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_MG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MG_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MG_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_MICROSMG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MICROSMG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MICROSMG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MICROSMG_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MICROSMG_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_MINISMG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MINISMG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_PISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_PISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_MINISMG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_MINISMG_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_PISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_PISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_PISTOL_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_PISTOL_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
             ["COMPONENT_PISTOL_MK2_CAMO_04"] = GetLabelText("WCT_CAMO_4"),
@@ -756,15 +993,15 @@ namespace vMenuClient.data
             ["COMPONENT_PISTOL_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_PISTOL_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_PISTOL_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_PISTOL_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_PISTOL_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_PISTOL_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_PISTOL_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_PISTOL_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_PISTOL_MK2_CLIP_HOLLOWPOINT"] = GetLabelText("WCT_CLIP_HP"),
             ["COMPONENT_PISTOL_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_PISTOL_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_PISTOL_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
-            ["COMPONENT_PISTOL50_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_PISTOL50_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_PISTOL50_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_PISTOL50_CLIP_02"] = "Magazine 2",
             ["COMPONENT_PISTOL50_VARMOD_LUXE"] = GetLabelText("WCT_VAR_SIL"),
             ["COMPONENT_PUMPSHOTGUN_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_PUMPSHOTGUN_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -802,8 +1039,8 @@ namespace vMenuClient.data
             ["COMPONENT_REVOLVER_VARMOD_BOSS"] = GetLabelText("WCT_REV_VARB"),
             ["COMPONENT_REVOLVER_VARMOD_GOON"] = GetLabelText("WCT_REV_VARG"),
             ["COMPONENT_SAWNOFFSHOTGUN_VARMOD_LUXE"] = GetLabelText("WCT_VAR_METAL"),
-            ["COMPONENT_SMG_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SMG_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SMG_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SMG_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SMG_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
             ["COMPONENT_SMG_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_SMG_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -816,16 +1053,16 @@ namespace vMenuClient.data
             ["COMPONENT_SMG_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_SMG_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_SMG_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_SMG_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SMG_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SMG_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SMG_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SMG_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_SMG_MK2_CLIP_HOLLOWPOINT"] = GetLabelText("WCT_CLIP_HP"),
             ["COMPONENT_SMG_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_SMG_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_SMG_VARMOD_LUXE"] = GetLabelText("WCT_VAR_GOLD"),
             ["COMPONENT_SNIPERRIFLE_VARMOD_LUXE"] = GetLabelText("WCT_VAR_WOOD"),
-            ["COMPONENT_SNSPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SNSPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SNSPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SNSPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SNSPISTOL_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_SNSPISTOL_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
             ["COMPONENT_SNSPISTOL_MK2_CAMO_04"] = GetLabelText("WCT_CAMO_4"),
@@ -837,15 +1074,15 @@ namespace vMenuClient.data
             ["COMPONENT_SNSPISTOL_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_SNSPISTOL_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_SNSPISTOL_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_SNSPISTOL_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SNSPISTOL_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SNSPISTOL_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SNSPISTOL_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SNSPISTOL_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_SNSPISTOL_MK2_CLIP_HOLLOWPOINT"] = GetLabelText("WCT_CLIP_HP"),
             ["COMPONENT_SNSPISTOL_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_SNSPISTOL_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
             ["COMPONENT_SNSPISTOL_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_WOOD"),
-            ["COMPONENT_SPECIALCARBINE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SPECIALCARBINE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SPECIALCARBINE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SPECIALCARBINE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SPECIALCARBINE_CLIP_03"] = GetLabelText("WCT_CLIP_DRM"),
             ["COMPONENT_SPECIALCARBINE_MK2_CAMO_02"] = GetLabelText("WCT_CAMO_2"),
             ["COMPONENT_SPECIALCARBINE_MK2_CAMO_03"] = GetLabelText("WCT_CAMO_3"),
@@ -858,42 +1095,33 @@ namespace vMenuClient.data
             ["COMPONENT_SPECIALCARBINE_MK2_CAMO_10"] = GetLabelText("WCT_CAMO_10"),
             ["COMPONENT_SPECIALCARBINE_MK2_CAMO_IND_01"] = GetLabelText("WCT_CAMO_IND"),
             ["COMPONENT_SPECIALCARBINE_MK2_CAMO"] = GetLabelText("WCT_CAMO_1"),
-            ["COMPONENT_SPECIALCARBINE_MK2_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_SPECIALCARBINE_MK2_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_SPECIALCARBINE_MK2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_SPECIALCARBINE_MK2_CLIP_02"] = "Magazine 2",
             ["COMPONENT_SPECIALCARBINE_MK2_CLIP_ARMORPIERCING"] = GetLabelText("WCT_CLIP_AP"),
             ["COMPONENT_SPECIALCARBINE_MK2_CLIP_FMJ"] = GetLabelText("WCT_CLIP_FMJ"),
             ["COMPONENT_SPECIALCARBINE_MK2_CLIP_INCENDIARY"] = GetLabelText("WCT_CLIP_INC"),
             ["COMPONENT_SPECIALCARBINE_MK2_CLIP_TRACER"] = GetLabelText("WCT_CLIP_TR"),
-            ["COMPONENT_SPECIALCARBINE_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_ETCHM"),
             ["COMPONENT_SWITCHBLADE_VARMOD_BASE"] = GetLabelText("WCT_SB_BASE"),
             ["COMPONENT_SWITCHBLADE_VARMOD_VAR1"] = GetLabelText("WCT_SB_VAR1"),
             ["COMPONENT_SWITCHBLADE_VARMOD_VAR2"] = GetLabelText("WCT_SB_VAR2"),
-            ["COMPONENT_VINTAGEPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_VINTAGEPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_VINTAGEPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_VINTAGEPISTOL_CLIP_02"] = "Magazine 2",
+            // CHRISTMAS 2018 DLC (v 1604)
             ["COMPONENT_RAYPISTOL_VARMOD_XMAS18"] = GetLabelText("WCT_VAR_RAY18"),
-            // MPHEIST3 DLC (v 1868)
-            ["COMPONENT_CERAMICPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_CERAMICPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_CERAMICPISTOL_SUPP"] = GetLabelText("WCT_SUPP"),
-            // MPHEIST4 DLC (v 2189)
-            ["COMPONENT_MILITARYRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_MILITARYRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_MILITARYRIFLE_SIGHT_01"] = GetLabelText("WCT_MRFL_SIGHT"),
-            // MPSECURITY DLC (v 2545)
+            // MP Security
             ["COMPONENT_APPISTOL_VARMOD_SECURITY"] = GetLabelText("WCT_VAR_STUD"),
             ["COMPONENT_MICROSMG_VARMOD_SECURITY"] = GetLabelText("WCT_VAR_WEED"),
             ["COMPONENT_PUMPSHOTGUN_VARMOD_SECURITY"] = GetLabelText("WCT_VAR_BONE"),
-            ["COMPONENT_HEAVYRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_HEAVYRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            ["COMPONENT_HEAVYRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_HEAVYRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_HEAVYRIFLE_SIGHT_01"] = GetLabelText("WCT_HVYRFLE_SIG"),
             ["COMPONENT_HEAVYRIFLE_CAMO1"] = GetLabelText("WCT_VAR_FAM"),
-            // MPSUM2 DLC (V 2699)
-            ["COMPONENT_TACTICALRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_TACTICALRIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_PRECISIONRIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
+            // MP SUM (2699)
+            ["COMPONENT_TACTICALRIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_TACTICALRIFLE_CLIP_02"] = "Magazine 2",
             ["COMPONENT_AT_AR_FLSH_REH"] = GetLabelText("WCT_FLASH"),
-            // MPCHRISTMAS3 DLC (V 2802)
-            ["COMPONENT_PISTOLXM3_CLIP_01"] = GetLabelText("WCT_CLIP1"),
+            // MP Christmas 3 (2803)
+            ["COMPONENT_PISTOLXM3_CLIP_01"] = "Magazine 1",
             ["COMPONENT_PISTOLXM3_SUPP"] = GetLabelText("WCT_SUPP"),
             ["COMPONENT_MICROSMG_VARMOD_XM3"] = GetLabelText("WCT_MSMG_XM3"),
             ["COMPONENT_PUMPSHOTGUN_VARMOD_XM3"] = GetLabelText("WCT_PUMPSHT_XM3"),
@@ -919,39 +1147,583 @@ namespace vMenuClient.data
             ["COMPONENT_KNIFE_VARMOD_XM3_07"] = GetLabelText("WCT_KNIFE_XM307"),
             ["COMPONENT_KNIFE_VARMOD_XM3_08"] = GetLabelText("WCT_KNIFE_XM308"),
             ["COMPONENT_KNIFE_VARMOD_XM3_09"] = GetLabelText("WCT_KNIFE_XM309"),
-            // MP2023_01 DLC (V 2944)
-            ["COMPONENT_TECPISTOL_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_TECPISTOL_CLIP_02"] = GetLabelText("WCT_CLIP2"),
+            // MP 2023 (2944)
+            ["COMPONENT_TECPISTOL_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_TECPISTOL_CLIP_02"] = "Magazine 2",
             ["COMPONENT_MICROSMG_VARMOD_FRN"] = GetLabelText("WCT_MSMGFRN_VAR"),
             ["COMPONENT_CARBINERIFLE_VARMOD_MICH"] = GetLabelText("WCT_CRBNMIC_VAR"),
             ["COMPONENT_RPG_VARMOD_TVR"] = GetLabelText("WCT_RPGTVR_VAR"),
-            // MP2023_02 DLC (V 3095)
-            ["COMPONENT_BATTLERIFLE_CLIP_01"] = GetLabelText("WCT_CLIP1"),
-            ["COMPONENT_BATTLERIFLE_CLIP_02"] = GetLabelText("WCT_CLIP2"),
-            ["COMPONENT_COMBATPISTOL_VARMOD_XMAS23"] = GetLabelText("WCT_COMPIST_XM"),
-            ["COMPONENT_SPECIALCARBINE_VARMOD_XMAS23"] = GetLabelText("WCT_SPCR_XM"),
-            ["COMPONENT_HEAVYSNIPER_VARMOD_XMAS23"] = GetLabelText("WCT_HVSP_XM"),
-            // MP2024_01 DLC (V 3258)
-            ["COMPONENT_STUNGUN_VARMOD_BAIL"] = GetLabelText("WCT_STNGN_BAIL"),
+            // MP 2023 (3095)
+            ["COMPONENT_BATTLERIFLE_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_BATTLERIFLE_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_SPECIALCARBINE_VARMOD_LOWRIDER"] = GetLabelText("WCT_VAR_ETCHM"),
+            ["COMPONENT_SPECIALCARBINE_VARMOD_XMAS23"] = GetLabelText("WCT_VAR_"),
+            // Addon Weapons
+            ["COMPONENT_AT_STOCK_01"] = GetLabelText("WCT_S1"),
+            ["COMPONENT_AT_STOCK_02"] = GetLabelText("WCT_S2"),
+            ["COMPONENT_AT_STOCK_03"] = GetLabelText("WCT_S3"),
+            ["COMPONENT_AT_STOCK_04"] = GetLabelText("WCT_S4"),
+            ["COMPONENT_AT_STOCK_05"] = GetLabelText("WCT_S5"),
+            // Extra-Components
+            ["COMPONENT_VIETNAM_CLIP_01"] = "M16 Magazine - Addon",
+            ["COMPONENT_VIETNAM_CLIP_02"] = "Painted M16 Magazine - Addon",
+            ["COMPONENT_COMP_CLIP_01"] = "California Compliant Magazine - Addon",
+            ["COMPONENT_COMP_CLIP_02"] = "Painted California Compliant Magazine - Addon",
+            ["COMPONENT_MILITARY_CLIP_01"] = "Military Magazine - Addon",
+            ["COMPONENT_MILITARY_CLIP_02"] = "Extended Military Magazine - Addon",
+            ["COMPONENT_OMEGA_CLIP_01"] = "Omega Drum Magazine - Addon",
+            ["COMPONENT_SOVIET_CLIP_01"] = "Soviet Magazine - Addon",
+            ["COMPONENT_SOVIET_CLIP_02"] = "Extended Soviet Magazine - Addon",
+            ["COMPONENT_AT_MUZZLE_CR"] = "Carbine Muzzle - Addon",
+            ["COMPONENT_AT_MUZZLE_BRD"] = "Bird Muzzle - Addon",
+            ["COMPONENT_AT_MUZZLE_KM"] = "KM Muzzle Break - Addon",
+            ["COMPONENT_IRON_SIGHT_01"] = "Iron Sight - Addon",
+            ["COMPONENT_IRON_SIGHT_02"] = "Iron Sight - Addon",
+            ["COMPONENT_AT_SCOPE_SMALLR"] = "Small Scope - Addon",
+            ["COMPONENT_AT_KALASH_STOCK_01"] = "Kalashnikov Stock - Addon",
+            ["COMPONENT_AT_KALASH_STOCK_02"] = "Kalashnikov Stock2 - Addon",
+            ["COMPONENT_AT_KALASH_STOCK_03"] = "Kalashnikov Stock3 - Addon",
+            ["COMPONENT_AT_KALASH_STOCK_04"] = "Kalashnikov Stock4 - Addon",
+            ["COMPONENT_AT_DOVERAIL"] = "Dove Rail - Addon",
+            ["COMPONENT_AT_M4_FLSH"] = "Flashlight & QPEG",
+            ["COMPONENT_AT_AR_M4_AFGRIP_01"] = "Vertical Grip & Tripod",
+            // M4
+            ["COMPONENT_M4_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_AT_M4_SCOPE_MEDIUM"] = "ACOG Sight - Addon",
+            ["COMPONENT_AT_M4_FLSH"] = "Flashlight",
+            ["COMPONENT_AT_M4_SUPP"] = "Suppressor",
+            // MK 18
+            ["COMPONENT_mk18b_CLIP_01"] = "Tan Magazine - Addon",
+            ["COMPONENT_AT_SCOPE_mk18b"] = "Holo Sight - Addon",
+            ["COMPONENT_AT_mk18b_FLSH"] = "Flashlight",
+            ["COMPONENT_AT_mk18b_SUPP"] = "Suppressor",
+            ["COMPONENT_AT_mk18b_AFGRIP"] = "Grip",
+            // FBI Rifle
+            ["COMPONENT_fbiarb_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_AT_fbiarb_AFGRIP"] = "Grip",
+            ["COMPONENT_AT_SCOPE_fbiarb"] = "Scope",
+            ["COMPONENT_AT_fbiarb_FLSH"] = "Flashlight",
+            // Snub Revolver
+            ["COMPONENT_SNUB_REVOLVER_CLIP_01"] = "Magazine 1",
+            // Combat Pistol 2
+            ["COMPONENT_COMBATPISTOL2_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATPISTOL2_CLIP_02"] = "Magazine 2",
+            // Combat Pistol 3
+            ["COMPONENT_COMBATPISTOL3_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_COMBATPISTOL3_CLIP_02"] = "Magazine 2",
+            // ScarH
+            ["COMPONENT_SCARH_CLIP_01"] = "ScarH Magazine - Addon",
+            ["COMPONENT_SCARH_CLIP_02"] = "ScarH Drum Magazine - Addon",
+            // HK416
+            ["COMPONENT_HK416_CLIP_01"] = "Standard Magazine",
+            ["COMPONENT_HK416_CLIP_02"] = "Extended Magazine",
+            ["COMPONENT_HK416_CLIP_03"] = "Window Magazine",
+            ["COMPONENT_HK416_CLIP_04"] = "HK Steel Maritime Magazine",
+            ["COMPONENT_AT_AR_HK416_AFGRIP"] = "Magpul AfG",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM"] = "Acog Ta01",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_02"] = "Aimpoint Pro",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_03"] = "Aimpoint T1",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_04"] = "Comp m4",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_05"] = "Eotech G33 (Down)",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_06"] = "Eotech G33 (UP)",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_07"] = "Exps3",
+            ["COMPONENT_AT_SCOPE_HK416_MEDIUM_08"] = "SRS 02",
+            ["COMPONENT_AT_AR_HK416_SUPP"] = "Suppressor",
+            ["COMPONENT_AT_AR_HK416_FLSH"] = "Tac-Light",
+            // Stealth Carbine
+            ["COMPONENT_AT_STEALTHCARBINE_SIGHT"] = "Low Profile Irons",
+            ["COMPONENT_AT_AR_SUPP_03"] = "Stealth Suppressor",
+            ["COMPONENT_AT_RAILCOVER_STEALTH"] = "Rail Covers",
+            // M4 Attachments
+            ["COMPONENT_M4A1_CLIP_01"] = "M4 Magazine",
+            ["COMPONENT_M4A3_CLIP_02"] = "M4 Magazine",
+            ["COMPONENT_AT_SCOPE_M4A2_MEDIUM_03"] = "EOTECH Optic",
+            ["COMPONENT_AT_SCOPE_M4A2_MEDIUM_02"] = "ACOG",
+            ["COMPONENT_AT_SCOPE_M4A2_MEDIUM_01"] = "ACOG 2",
+            ["COMPONENT_AT_AR_M4A1_SUPP_03"] = "Suppressor",
+            //M6IC
+            ["COMPONENT_M6IC_FRAME_01"] = "M6IC Frame",
+            ["COMPONENT_M6IC_FRAME_02"] = "M6IC Frame 2",
+            ["COMPONENT_M6IC_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_M6IC_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_M6IC_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_M6IC_CLIP_04"] = "Magazine 4",
+            ["COMPONENT_M6IC_CLIP_05"] = "Magazine 5",
+            ["COMPONENT_M6IC_CLIP_06"] = "Magazine 6",
+            ["COMPONENT_M6IC_SCOPE_01"] = "Scope 1",
+            ["COMPONENT_M6IC_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_M6IC_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_M6IC_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_M6IC_SCOPE_05"] = "Scope 5",
+            ["COMPONENT_M6IC_SCOPE_06"] = "Scope 6",
+            ["COMPONENT_M6IC_SCOPE_07"] = "Scope 7",
+            ["COMPONENT_M6IC_SCOPE_08"] = "Scope 8",
+            ["COMPONENT_M6IC_SCOPE_09"] = "Scope 9",
+            ["COMPONENT_M6IC_SCOPE_10"] = "Scope 10",
+            ["COMPONENT_M6IC_FLSH_01"] = "Flashlight",
+            ["COMPONENT_M6IC_FLSH_02"] = "Flashlight2",
+            ["COMPONENT_M6IC_SUPP_01"] = "Suppressor 1",
+            ["COMPONENT_M6IC_SUPP_02"] = "Suppressor 2",
+            ["COMPONENT_M6IC_SUPP_03"] = "Suppressor 3",
+            ["COMPONENT_M6IC_STOCK_01"] = "Stock 1",
+            ["COMPONENT_M6IC_STOCK_02"] = "Stock 2",
+            ["COMPONENT_M6IC_STOCK_03"] = "Stock 3",
+            ["COMPONENT_M6IC_STOCK_04"] = "Stock 4",
+            ["COMPONENT_M6IC_STOCK_05"] = "Stock 5",
+            ["COMPONENT_M6IC_STOCK_06"] = "Stock 6",
+            ["COMPONENT_M6IC_STOCK_07"] = "Stock 7",
+            ["COMPONENT_M6IC_STOCK_08"] = "Stock 8",
+            //XMR
+            ["COMPONENT_VICTUSXMR_CLIP_01"] = "Standard Magazine",
+            ["COMPONENT_VICTUSXMR_SCOPE_01"] = "Standard Scope",
+            //HK417
+            ["COMPONENT_HK417_CLIP_01"] = "Standard Magazine",
+            ["COMPONENT_HK417_CLIP_02"] = "Extended Magazine",
+            ["COMPONENT_AT_SCOPE_HK417_MEDIUM"] = "Acog Ta01", // There was no scope for that GetLabelText in the asset name resource, I made it use the HK416 Scope.
+            ["COMPONENT_AT_HK417_FLSH"] = "PEQ Laser",
+            // Marko Mods
+            ["COMPONENT_G17_BARREL_01"] = "Barrel 1",
+            ["COMPONENT_G17_BARREL_02"] = "Barrel 2",
+            ["COMPONENT_G17_BARREL_03"] = "Barrel 3",
+            ["COMPONENT_G17_BARREL_04"] = "Barrel 4",
+            ["COMPONENT_G17_BARREL_05"] = "Barrel 5",
+            ["COMPONENT_G17_BARREL_06"] = "Barrel 6",
+            ["COMPONENT_G17_BARREL_07"] = "Barrel 7", // Assuming BARREL7 exists but wasn't listed in the provided text entries
+            ["COMPONENT_G17_CLIP_01"] = "MAGAZINE 1",
+            ["COMPONENT_G17_CLIP_02"] = "MAGAZINE 2",
+            ["COMPONENT_G17_CLIP_03"] = "MAGAZINE 3",
+            ["COMPONENT_G17_CLIP_04"] = "MAGAZINE 4",
+            ["COMPONENT_G17_CLIP_05"] = "MAGAZINE 5",
+            ["COMPONENT_G17_FLASH_01"] = "Flashlight",
+            ["COMPONENT_G17_FLASH_02"] = "Flashlight 2",
+            ["COMPONENT_G17_FLASH_03"] = "Flashlight 3",
+            ["COMPONENT_G17_FLASH_04"] = "Flashlight 4",
+            ["COMPONENT_G17_FRAME_01"] = "Frame",
+            ["COMPONENT_G17_FRAME_02"] = "Frame 2",
+            ["COMPONENT_G17_FRAME_03"] = "Frame 3",
+            ["COMPONENT_G17_FRAME_04"] = "Frame 4",
+            ["COMPONENT_G17_FRAME_05"] = "Frame 5",
+            ["COMPONENT_G17_SLIDE_01"] = "Slide",
+            ["COMPONENT_G17_SLIDE_02"] = "Slide 2",
+            ["COMPONENT_G17_SLIDE_03"] = "Slide 3",
+            ["COMPONENT_G17_SLIDE_04"] = "Slide 4",
+            ["COMPONENT_G17_SLIDE_05"] = "Slide 5",
+            ["COMPONENT_G17_SLIDE_06"] = "Slide 6",
+            ["COMPONENT_G17_SLIDE_07"] = "Slide 7",
+            ["COMPONENT_G17_SLIDE_08"] = "Slide 8",
+            ["COMPONENT_G17_SLIDE_09"] = "Slide 9",
+            ["COMPONENT_G17_SUPPRESSOR_01"] = "SUPPRESSOR",
+            ["COMPONENT_G17_SUPPRESSOR_02"] = "SUPPRESSOR 2",
+            ["COMPONENT_G17_SUPPRESSOR_03"] = "SUPPRESSOR 3",
+            ["COMPONENT_G17_SUPPRESSOR_04"] = "SUPPRESSOR 4",
+            ["COMPONENT_G17_SUPPRESSOR_05"] = "SUPPRESSOR 5",
+            ["COMPONENT_G17_SUPPRESSOR_06"] = "SUPPRESSOR 6",
+            ["COMPONENT_G17_SUPPRESSOR_07"] = "SUPPRESSOR 7",
+            ["COMPONENT_G17_SUPPRESSOR_08"] = "SUPPRESSOR 8",
+            ["COMPONENT_G17_SUPPRESSOR_09"] = "SUPPRESSOR 9",
+            // M870
+            ["COMPONENT_m870_BARREL_01"] = "Barrel",
+            ["COMPONENT_m870_BARREL_02"] = "Barrel 2",
+            ["COMPONENT_m870_BARREL_03"] = "Barrel 3",
+            ["COMPONENT_m870_BARREL_04"] = "Barrel 4",
+            ["COMPONENT_m870_BARREL_05"] = "Barrel 5",
+            ["COMPONENT_m870_BARREL_06"] = "Barrel 6",
+            ["COMPONENT_m870_BARREL_07"] = "Barrel 7",
+            ["COMPONENT_m870_CLIP_01"] = "Magazine",
+            ["COMPONENT_m870_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_m870_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_m870_HANDGUARD_01"] = "Hand Guard",
+            ["COMPONENT_m870_HANDGUARD_02"] = "Hand Guard 2",
+            ["COMPONENT_m870_HANDGUARD_03"] = "Hand Guard 3",
+            ["COMPONENT_m870_SCOPE_01"] = "Scope",
+            ["COMPONENT_m870_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_m870_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_m870_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_m870_STOCK_01"] = "STOCK",
+            ["COMPONENT_m870_STOCK_02"] = "STOCK 2",
+            ["COMPONENT_m870_STOCK_03"] = "STOCK 3",
+            ["COMPONENT_m870_STOCK_04"] = "STOCK 4",
+            ["COMPONENT_m870_STOCK_05"] = "STOCK 5",
+            ["COMPONENT_m870_STOCK_06"] = "STOCK 6",
+            ["COMPONENT_m870_STOCK_07"] = "STOCK 7",
+            // MK18
+            ["COMPONENT_MK18_suppressor_01"] = "suppressor",
+            ["COMPONENT_MK18_suppressor_02"] = "suppressor 2",
+            ["COMPONENT_MK18_suppressor_03"] = "suppressor 3",
+            ["COMPONENT_MK18_suppressor_04"] = "suppressor 4",
+            ["COMPONENT_MK18_suppressor_05"] = "suppressor 5",
+            ["COMPONENT_MK18_suppressor_06"] = "suppressor 6",
+            ["COMPONENT_MK18_CLIP_01"] = "Magazine",
+            ["COMPONENT_MK18_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_MK18_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_MK18_CLIP_04"] = "Magazine 4",
+            ["COMPONENT_MK18_CLIP_05"] = "Magazine 5",
+            ["COMPONENT_MK18_CLIP_06"] = "Magazine 6",
+            ["COMPONENT_MK18_CLIP_07"] = "Magazine 7",
+            ["COMPONENT_MK18_FLASH_01"] = "Flashlight",
+            ["COMPONENT_MK18_FLASH_02"] = "Flashlight 2",
+            ["COMPONENT_MK18_FLASH_03"] = "Flashlight 3",
+            ["COMPONENT_MK18_FLASH_04"] = "Flashlight 4",
+            ["COMPONENT_MK18_FLASH_05"] = "Flashlight 5",
+            ["COMPONENT_MK18_FLASH_06"] = "Flashlight 6",
+            ["COMPONENT_MK18_FRAME_01"] = "Frame",
+            ["COMPONENT_MK18_FRAME_02"] = "Frame 2",
+            ["COMPONENT_MK18_FRAME_03"] = "Frame 3",
+            ["COMPONENT_MK18_SCOPE_01"] = "Scope",
+            ["COMPONENT_MK18_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_MK18_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_MK18_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_MK18_SCOPE_05"] = "Scope 5",
+            ["COMPONENT_MK18_SCOPE_06"] = "Scope 6",
+            ["COMPONENT_MK18_SCOPE_07"] = "Scope 7",
+            ["COMPONENT_MK18_SCOPE_08"] = "Scope 8",
+            ["COMPONENT_MK18_SCOPE_09"] = "Scope 9",
+            ["COMPONENT_MK18_STOCK_01"] = "STOCK",
+            ["COMPONENT_MK18_STOCK_02"] = "STOCK 2",
+            ["COMPONENT_MK18_STOCK_03"] = "STOCK 3",
+            ["COMPONENT_MK18_STOCK_04"] = "STOCK 4",
+            ["COMPONENT_MK18_STOCK_05"] = "STOCK 5",
+            ["COMPONENT_MK18_STOCK_06"] = "STOCK 6",
+            ["COMPONENT_MK18_STOCK_07"] = "STOCK 7",
+            ["COMPONENT_MK18_GRIP_01"] = "GRIP",
+            ["COMPONENT_MK18_GRIP_02"] = "GRIP 2",
+            ["COMPONENT_MK18_GRIP_03"] = "GRIP 3",
+            ["COMPONENT_MK18_GRIP_04"] = "GRIP 4",
+            ["COMPONENT_MK18_GRIP_05"] = "GRIP 5",
+            // MPX
+            ["COMPONENT_MPX_BARREL_01"] = "BARREL",
+            ["COMPONENT_MPX_BARREL_02"] = "BARREL 2",
+            ["COMPONENT_MPX_BARREL_03"] = "BARREL 3",
+            ["COMPONENT_MPX_BARREL_04"] = "BARREL 4",
+            ["COMPONENT_MPX_BARREL_05"] = "BARREL 5",
+            ["COMPONENT_MPX_BARREL_06"] = "BARREL 6",
+            ["COMPONENT_MPX_BARREL_07"] = "BARREL 7",
+            ["COMPONENT_MPX_BARREL_08"] = "BARREL 8",
+            ["COMPONENT_MPX_BARREL_09"] = "BARREL 9",
+            ["COMPONENT_MPX_BARREL_10"] = "BARREL 10",
+            ["COMPONENT_MPX_BARREL_11"] = "BARREL 11",
+            ["COMPONENT_MPX_BARREL_12"] = "BARREL 12",
+            ["COMPONENT_MPX_CLIP_01"] = "Magazine",
+            ["COMPONENT_MPX_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_MPX_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_MPX_FLSH_01"] = "Flashlight",
+            ["COMPONENT_MPX_FLSH_02"] = "Flashlight 2",
+            ["COMPONENT_MPX_FLSH_03"] = "Flashlight 3",
+            ["COMPONENT_MPX_FLSH_04"] = "Flashlight 4",
+            ["COMPONENT_MPX_FLSH_05"] = "Flashlight 5",
+            ["COMPONENT_MPX_FLSH_06"] = "Flashlight 6",
+            ["COMPONENT_MPX_FLSH_07"] = "Flashlight 7",
+            ["COMPONENT_MPX_FLSH_08"] = "Flashlight 8",
+            ["COMPONENT_MPX_HANDGUARD_01"] = "HANDGUARD",
+            ["COMPONENT_MPX_HANDGUARD_02"] = "HANDGUARD 2",
+            ["COMPONENT_MPX_HANDGUARD_03"] = "HANDGUARD 3",
+            ["COMPONENT_MPX_HANDGUARD_04"] = "HANDGUARD 4",
+            ["COMPONENT_MPX_HANDGUARD_05"] = "HANDGUARD 5",
+            ["COMPONENT_MPX_HANDGUARD_06"] = "HANDGUARD 6",
+            ["COMPONENT_MPX_SCOPE_01"] = "Scope",
+            ["COMPONENT_MPX_SCOPE_02"] = "Scope 3",
+            ["COMPONENT_MPX_SCOPE_03"] = "Scope 4",
+            ["COMPONENT_MPX_SCOPE_04"] = "Scope 5",
+            ["COMPONENT_MPX_SCOPE_05"] = "Scope 6",
+            ["COMPONENT_MPX_SCOPE_06"] = "Scope 7",
+            ["COMPONENT_MPX_SCOPE_07"] = "Scope 8",
+            ["COMPONENT_MPX_SCOPE_08"] = "Scope 9",
+            ["COMPONENT_MPX_SCOPE_09"] = "Scope 10",
+            ["COMPONENT_MPX_STOCK_01"] = "Stock",
+            ["COMPONENT_MPX_STOCK_02"] = "Stock 2",
+            ["COMPONENT_MPX_STOCK_03"] = "Stock 3",
+            ["COMPONENT_MPX_STOCK_04"] = "Stock 4",
+            ["COMPONENT_MPX_STOCK_05"] = "Stock 5",
+            ["COMPONENT_MPX_STOCK_06"] = "Stock 6",
+            ["COMPONENT_MPX_STOCK_07"] = "Stock 7",
+            ["COMPONENT_MPX_STOCK_08"] = "Stock 8",
+            ["COMPONENT_MPX_STOCK_09"] = "Stock 9",
+            ["COMPONENT_MPX_STOCK_10"] = "Stock 10",
+            //PP19
+            ["COMPONENT_PP19_CLIP_01"] = "MAGAZINE 1",
+            ["COMPONENT_PP19_CLIP_02"] = "MAGAZINE 2",
+            ["COMPONENT_PP19_CLIP_03"] = "MAGAZINE 3",
+            ["COMPONENT_PP19_CLIP_04"] = "MAGAZINE 4",
+            ["COMPONENT_PP19_CLIP_05"] = "MAGAZINE 5",
+            ["COMPONENT_PP19_CLIP_06"] = "MAGAZINE 6",
+            ["COMPONENT_PP19_CLIP_07"] = "MAGAZINE 7",
+            ["COMPONENT_PP19_GRIP_01"] = "GRIP",
+            ["COMPONENT_PP19_GRIP_02"] = "GRIP2",
+            ["COMPONENT_PP19_GRIP_03"] = "GRIP3",
+            ["COMPONENT_PP19_GRIP_04"] = "GRIP4",
+            ["COMPONENT_PP19_GRIP_05"] = "GRIP5",
+            ["COMPONENT_PP19_GRIP_06"] = "GRIP6",
+            ["COMPONENT_PP19_GRIP_07"] = "GRIP7",
+            ["COMPONENT_PP19_GRIP_08"] = "GRIP8",
+            ["COMPONENT_PP19_GRIP_09"] = "GRIP9",
+            ["COMPONENT_PP19_HANDGUARD_01"] = "HANDGUARD",
+            ["COMPONENT_PP19_HANDGUARD_02"] = "HANDGUARD2",
+            ["COMPONENT_PP19_HANDGUARD_03"] = "HANDGUARD3",
+            ["COMPONENT_PP19_HANDGUARD_04"] = "HANDGUARD4",
+            ["COMPONENT_PP19_HANDGUARD_05"] = "HANDGUARD5",
+            ["COMPONENT_PP19_HANDGUARD_06"] = "HANDGUARD6",
+            ["COMPONENT_PP19_HANDGUARD_07"] = "HANDGUARD7",
+            ["COMPONENT_PP19_HANDGUARD_08"] = "HANDGUARD8",
+            ["COMPONENT_PP19_HANDGUARD_09"] = "HANDGUARD9",
+            ["COMPONENT_PP19_LASER_01"] = "Flashlight",
+            ["COMPONENT_PP19_LASER_02"] = "Flashlight 2",
+            ["COMPONENT_PP19_LASER_03"] = "Flashlight 3",
+            ["COMPONENT_PP19_LASER_04"] = "Flashlight 4",
+            ["COMPONENT_PP19_LASER_05"] = "Flashlight 5",
+            ["COMPONENT_PP19_LASER_06"] = "Flashlight 6",
+            ["COMPONENT_PP19_LASER_07"] = "Flashlight 7",
+            ["COMPONENT_PP19_MUZZLE_01"] = "MUZZLE",
+            ["COMPONENT_PP19_MUZZLE_02"] = "MUZZLE2",
+            ["COMPONENT_PP19_MUZZLE_03"] = "MUZZLE3",
+            ["COMPONENT_PP19_MUZZLE_04"] = "MUZZLE4",
+            ["COMPONENT_PP19_MUZZLE_05"] = "MUZZLE5",
+            ["COMPONENT_PP19_MUZZLE_06"] = "MUZZLE6",
+            ["COMPONENT_PP19_SCOPE_01"] = "Scope",
+            ["COMPONENT_PP19_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_PP19_SCOPE_03"] = "Scope 2",
+            ["COMPONENT_PP19_SCOPE_04"] = "Scope 1",
+            ["COMPONENT_PP19_SCOPE_05"] = "WCT_SCOPE_MED5",
+            ["COMPONENT_PP19_SCOPE_06"] = "WCT_SCOPE_MED6",
+            ["COMPONENT_PP19_SCOPE_07"] = "WCT_SCOPE_MED7",
+            ["COMPONENT_PP19_SCOPE_08"] = "WCT_SCOPE_MED8",
+            ["COMPONENT_PP19_SCOPE_09"] = "WCT_SCOPE_MED9",
+            ["COMPONENT_PP19_SCOPE_10"] = "WCT_SCOPE_MED 10",
+            ["COMPONENT_PP19_STOCK_0"] = "STOCK",
+            ["COMPONENT_PP19_STOCK_1"] = "STOCK 2",
+            ["COMPONENT_PP19_STOCK_2"] = "STOCK 3",
+            ["COMPONENT_PP19_STOCK_3"] = "STOCK 4",
+            ["COMPONENT_PP19_STOCK_4"] = "STOCK 5",
+            ["COMPONENT_PP19_STOCK_5"] = "STOCK 6",
+            ["COMPONENT_PP19_STOCK_6"] = "STOCK 7",
+            ["COMPONENT_PP19_STOCK_7"] = "STOCK 8",
+            ["COMPONENT_PP19_STOCK_8"] = "STOCK 9",
+            //M110
+            ["COMPONENT_M110_SCOPE_11"] = "Iron Sight",
+            ["COMPONENT_M110_SCOPE_01"] = "Scope 1",
+            ["COMPONENT_M110_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_M110_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_M110_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_M110_SCOPE_05"] = "Scope 5",
+            ["COMPONENT_M110_SCOPE_06"] = "Scope 6",
+            ["COMPONENT_M110_SCOPE_07"] = "Scope 7",
+            ["COMPONENT_M110_SCOPE_08"] = "Scope 8",
+            ["COMPONENT_M110_SCOPE_09"] = "Scope 9",
+            ["COMPONENT_M110_SCOPE_10"] = "Scope 10",
+            ["COMPONENT_M110_GRIP_01"] = "Grip 1",
+            ["COMPONENT_M110_GRIP_02"] = "Grip 2",
+            ["COMPONENT_M110_GRIP_03"] = "Grip 3",
+            ["COMPONENT_M110_GRIP_04"] = "Grip 4",
+            ["COMPONENT_M110_GRIP_05"] = "Grip 5",
+            ["COMPONENT_M110_GRIP_06"] = "Grip 6",
+            ["COMPONENT_M110_BIPOD_01"] = "Bipod 1",
+            ["COMPONENT_M110_BIPOD_02"] = "Bipod 2",
+            ["COMPONENT_M110_COVER_01"] = "Rail Cover",
+            ["COMPONENT_M110_COVER_02"] = "Rail Cover 2",
+            ["COMPONENT_M110_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_M110_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_M110_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_M110_CLIP_04"] = "Magazine 4",
+            ["COMPONENT_M110_CLIP_05"] = "Magazine 5",
+            ["COMPONENT_M110_CLIP_06"] = "Magazine 6",
+            ["COMPONENT_M110_CLIP_07"] = "Magazine 7",
+            ["COMPONENT_M110_CLIP_08"] = "Magazine 8",
+            ["COMPONENT_M110_CLIP_09"] = "Magazine 9",
+            ["COMPONENT_M110_CLIP_10"] = "Magazine 10",
+            ["COMPONENT_M110_SUPP_01"] = "Suppressor 1",
+            ["COMPONENT_M110_SUPP_02"] = "Suppressor 2",
+            ["COMPONENT_M110_SUPP_03"] = "Suppressor 3",
+            ["COMPONENT_M110_SUPP_04"] = "Suppressor 4",
+            ["COMPONENT_M110_SUPP_05"] = "Suppressor 5",
+            ["COMPONENT_M110_SUPP_06"] = "Suppressor 6",
+            ["COMPONENT_M110_SUPP_07"] = "Suppressor 7",
+            ["COMPONENT_M110_STOCK_01"] = "Stock",
+            ["COMPONENT_M110_STOCK_02"] = "Stock 2",
+            ["COMPONENT_M110_STOCK_03"] = "Stock 3",
+            ["COMPONENT_M110_STOCK_04"] = "Stock 4",
+            ["COMPONENT_M110_STOCK_05"] = "Stock 5",
+            ["COMPONENT_M110_STOCK_06"] = "Stock 6",
+            ["COMPONENT_M110_STOCK_07"] = "Stock 7",
+            ["COMPONENT_M110_STOCK_08"] = "Stock 8",
+            ["COMPONENT_M110_STOCK_09"] = "Stock 9",
+            ["COMPONENT_M110_FLSH_01"] = "Flashlight",
+            ["COMPONENT_M110_FLSH_02"] = "Flashlight 2",
+            ["COMPONENT_M110_FLSH_03"] = "Flashlight 3",
+            ["COMPONENT_M110_FLSH_04"] = "Flashlight 4",
+            ["COMPONENT_M110_FLSH_05"] = "Flashlight 5",
+            ["COMPONENT_M110_FLSH_06"] = "Flashlight 6",
+            ["COMPONENT_M110_FLSH_07"] = "Flashlight 7",
+            ["COMPONENT_M110_FLSH_08"] = "Flashlight 8",
+            ["COMPONENT_M110_FLSH_09"] = "Flashlight 9",
+            ["COMPONENT_M110_FLSH_10"] = "Flashlight 10",
+            ["COMPONENT_M110_FLSH_11"] = "Flashlight 11",
+            //P320a
+            ["COMPONENT_MARKOMODSP320a_FLASH_01"] = "Taclight",
+            ["COMPONENT_MARKOMODSP320a_CLIP_01"] = "Magazine 1",
+            //P320b
+            ["COMPONENT_MARKOMODSP320b_FLASH_01"] = "Taclight",
+            ["COMPONENT_MARKOMODSP320b_CLIP_01"] = "Magazine 1",
+            //M4A1FM
+            ["COMPONENT_M4A1FM_SCOPE_01"] = "Scope",
+            ["COMPONENT_M4A1FM_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_M4A1FM_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_M4A1FM_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_M4A1FM_FLSH_01"] = "Flashlight",
+            ["COMPONENT_M4A1FM_FLSH_02"] = "Flashlight 2",
+            ["COMPONENT_M4A1FM_FLSH_03"] = "Flashlight 3",
+            ["COMPONENT_M4A1FM_FLSH_04"] = "Flashlight 4",
+            ["COMPONENT_M4A1FM_FLSH_05"] = "Flashlight 5",
+            ["COMPONENT_M4A1FM_FLSH_06"] = "Flashlight 6",
+            ["COMPONENT_M4A1FM_CLIP_02"] = "30rd Magazine",
+            ["COMPONENT_M4A1FM_CLIP_03"] = "60rd Magazine",
+            ["COMPONENT_M4A1FM_CLIP_04"] = "Drum Magazine",
+            ["COMPONENT_M4A1FM_BARREL_01"] = "Short Barrel",
+            ["COMPONENT_M4A1FM_BARREL_02"] = "Extended Barrel",
+            ["COMPONENT_M4A1FM_BARREL_03"] = "Short Barrel Suppressor",
+            ["COMPONENT_M4A1FM_BARREL_04"] = "Extended Barrel Suppressor",
+            //ColBaton
+            ["COMPONENT_COLBATON_GRIP_01"] = "Tactical Grip",
+            //M4 New
+            ["COMPONENT_MARKOMODSM4_CLIP_01"] = "Magazine",
+            ["COMPONENT_MARKOMODSM4_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_MARKOMODSM4_CLIP_03"] = "Magazine 3",
+            ["COMPONENT_MARKOMODSM4_CLIP_04"] = "Magazine 4",
+            ["COMPONENT_MARKOMODSM4_CLIP_05"] = "Magazine 5",
+            ["COMPONENT_MARKOMODSM4_CLIP_06"] = "Magazine 6",
+            ["COMPONENT_MARKOMODSM4_CLIP_07"] = "Magazine 7",
+            ["COMPONENT_MARKOMODSM4_STOCK_01"] = "Stock",
+            ["COMPONENT_MARKOMODSM4_STOCK_02"] = "Stock 2",
+            ["COMPONENT_MARKOMODSM4_STOCK_03"] = "Stock 3",
+            ["COMPONENT_MARKOMODSM4_STOCK_04"] = "Stock 4",
+            ["COMPONENT_MARKOMODSM4_STOCK_05"] = "Stock 5",
+            ["COMPONENT_MARKOMODSM4_HANDGUARD_01"] = "Handguard",
+            ["COMPONENT_MARKOMODSM4_HANDGUARD_02"] = "Handguard 2",
+            ["COMPONENT_MARKOMODSM4_HANDGUARD_03"] = "Handguard 3",
+            ["COMPONENT_MARKOMODSM4_GRIP_01"] = "Grip",
+            ["COMPONENT_MARKOMODSM4_GRIP_02"] = "Grip 2",
+            ["COMPONENT_MARKOMODSM4_GRIP_03"] = "Grip 3",
+            ["COMPONENT_MARKOMODSM4_GRIP_04"] = "Grip 4",
+            ["COMPONENT_MARKOMODSM4_GRIP_05"] = "Grip 5",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_01"] = "Suppressor",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_02"] = "Suppressor 2",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_03"] = "Suppressor 3",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_04"] = "Suppressor 4",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_05"] = "Suppressor 5",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_06"] = "Suppressor 6",
+            ["COMPONENT_MARKOMODSM4_SUPPRESSOR_07"] = "Suppressor 7",
+            ["COMPONENT_MARKOMODSM4_SCOPE_01"] = "Scope",
+            ["COMPONENT_MARKOMODSM4_SCOPE_02"] = "Scope 2",
+            ["COMPONENT_MARKOMODSM4_SCOPE_03"] = "Scope 3",
+            ["COMPONENT_MARKOMODSM4_SCOPE_04"] = "Scope 4",
+            ["COMPONENT_MARKOMODSM4_SCOPE_05"] = "Scope 5",
+            ["COMPONENT_MARKOMODSM4_SCOPE_06"] = "Scope 6",
+            ["COMPONENT_MARKOMODSM4_SCOPE_07"] = "Scope 7",
+            ["COMPONENT_MARKOMODSM4_SCOPE_08"] = "Scope 8",
+            ["COMPONENT_MARKOMODSM4_SCOPE_09"] = "Scope 9",
+            ["COMPONENT_MARKOMODSM4_FLASH_01"] = "Flashlight",
+            ["COMPONENT_MARKOMODSM4_FLASH_02"] = "Flashlight 2",
+            ["COMPONENT_MARKOMODSM4_FLASH_03"] = "Flashlight 3",
+            ["COMPONENT_MARKOMODSM4_FLASH_04"] = "Flashlight 4",
+            ["COMPONENT_MARKOMODSM4_FLASH_05"] = "Flashlight 5",
+            ["COMPONENT_MARKOMODSM4_FLASH_06"] = "Flashlight 6",
+            ["COMPONENT_MARKOMODSM4_FLASH_07"] = "Flashlight 7",
+            ["COMPONENT_MARKOMODSM4_FLASH_08"] = "Flashlight 8",
+            //Barrett M107
+            ["COMPONENT_M107_CLIP_01"] = "Clip 1",
+            ["COMPONENT_M107_CLIP_02"] = "Clip 2",
+            ["COMPONENT_M107_CLIP_ARMORPIERCING"] = "Armor Piercing Clip",
+            ["COMPONENT_M107_CLIP_EXPLOSIVE"] = "Explosive Clip",
+            ["COMPONENT_M107_CLIP_FMJ"] = "FMJ Clip",
+            ["COMPONENT_M107_CLIP_INCENDIARY"] = "Incendiary Clip",
+            ["COMPONENT_AT_SR_BARREL_03"] = "Default Barrel",
+            ["COMPONENT_AT_SR_BARREL_04"] = "Heavy Barrel",
+            ["COMPONENT_M107_CAMO"] = "Accessories 1",
+            ["COMPONENT_M107_CAMO_02"] = "Accessories 2",
+            ["COMPONENT_M107_CAMO_03"] = "Accessories 3",
+            ["COMPONENT_M107_CAMO_04"] = "Accessories 4",
+            ["COMPONENT_M107_CAMO_05"] = "Accessories 5",
+            ["COMPONENT_M107_CAMO_06"] = "Accessories 6",
+            ["COMPONENT_M107_CAMO_07"] = "Accessories 7",
+            ["COMPONENT_M107_CAMO_08"] = "Accessories 8",
+            ["COMPONENT_M107_CAMO_09"] = "Accessories 9",
+            ["COMPONENT_M107_CAMO_10"] = "Accessories 10",
+            ["COMPONENT_AT_SCOPE_M107_MAX"] = "12x Scope",
+            ["COMPONENT_AT_SCOPE_M107_LARGE"] = "8x Scope",
+            ["COMPONENT_AT_SCOPE_M107_NV"] = "Night Vision Scope",
+            ["COMPONENT_AT_SR_SUPP_03"] = "Suppressor",
+            ["COMPONENT_M107_BIPOD"] = "Bipod",
+            //Military Carbine
+            ["COMPONENT_MILITARYCARBINE_CARRYHANDLE"] = "Carry Handle",
+            //M40 Sniper Rifle
+            ["COMPONENT_AT_SCOPE_GHILLIE"] = "Scope with Ghillie Cover",
+            ["COMPONENT_AT_SCOPE_LARGE2"] = "M40 Large Scope",
+            //LR25
+            ["COMPONENT_LR25_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_AT_SCOPE_LR25"] = "Large Scope",
+            ["COMPONENT_ASSAULTSNIPER_SCOPE_FAKE"] = "Large Scope 2",
+            ["COMPONENT_AT_LR25_AFGRIP"] = "Grip",
+            ["COMPONENT_AT_LR25_FOREGRIP"] = "Fore Grip",
+            ["COMPONENT_AT_LR25_SUPP"] = "Suppressor",
+            //MP7
+            ["COMPONENT_MP7_CLIP_01"] = "MP7 Magazine",
+            ["COMPONENT_MP7_CLIP_02"] = "MP7 Extended Magazine",
+            //LBRS
+            ["COMPONENT_LBRS_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_AT_LBRS_AFGRIP"] = "Grip",
+            ["COMPONENT_AT_LBRS_FLSH"] = "Flashlight",
+            ["COMPONENT_AT_LBRS_SUPP"] = "Suppressor",
+            ["COMPONENT_AT_SCOPE_LBRS"] = "Medium Sight",
+            //Glock 19M
+            ["COMPONENT_X17_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_X17_CLIP_02"] = "Magazine 2",
+            ["COMPONENT_AT_X17_FLSH"] = "Flashlight",
+            ["COMPONENT_FBIG19M_VARMOD_DOJ"] = "DOJ Spec Glock 19M",
+            //FBI MK4
+            ["COMPONENT_AT_AR_FLSH_FBIMK4"] = "Flashlight",
+            ["COMPONENT_FBIMK4_CLIP_01"] = "Magazine 1",
+            ["COMPONENT_FBIMK4_VARMOD_HRT"] = "FBI Spec MK4 - HRT",
+            //FBI SOG Rifle
+            ["COMPONENT_PRO_B"] = "Aimpoint Pro Red Dot Sight - Black",
+            ["COMPONENT_PRO_OD"] = "Aimpoint Pro Red Dot Sight - OD",
+            ["COMPONENT_PRO_C"] = "Aimpoint Pro Red Dot Sight - Coyote",
+            ["COMPONENT_EXPS34_B"] = "EOTech EXPS3-4 Holographic Sight - Black",
+            ["COMPONENT_EXPS34_C"] = "EOTech EXPS3-4 Holographic Sight - Coyote",
+            ["COMPONENT_HHSVO_B"] = "EOTech HHS V Holographic Sight w/ Magnifier Open (Blk)",
+            ["COMPONENT_HHSVO_C"] = "EOTech HHS V Holographic Sight w/ Magnifier Open (C)",
+            ["COMPONENT_HHSVC_B"] = "EOTech HHS V Holographic Sight w/ Magnifier Closed (Blk)",
+            ["COMPONENT_HHSVC_C"] = "EOTech HHS V Holographic Sight w/ Magnifier Closed (C)",
+            ["COMPONENT_VUDU_1X"] = "EOTech Vudu 1x",
+            ["COMPONENT_PMAG30_B"] = "PMAG 30r - Black",
+            ["COMPONENT_PMAG30_C"] = "PMAG 30r - Coyote",
+            ["COMPONENT_PMAG40_B"] = "PMAG 40r - Black",
+            ["COMPONENT_PMAGRANGER_B"] = "PMAG 30r with Rangerplate - Black",
+            ["COMPONENT_PMAGLINK_B"] = "PMAG 60r Maglinked - Black",
+            ["COMPONENT_PMAGLINK_C"] = "PMAG 60r Maglinked - Coyote",
+            ["COMPONENT_BCM_B"] = "BCM Vertical Grip Mod 3 - Black",
+            ["COMPONENT_BCM_OD"] = "BCM Vertical Grip Mod 3 - OD",
+            ["COMPONENT_BCM_C"] = "BCM Vertical Grip Mod 3 - Coyote",
+            ["COMPONENT_SFS11_B"] = "SureFire ScoutLight w/ Single Switch",
+            ["COMPONENT_PEQ11_B"] = "SureFire ScoutLight & PEQ-15A w/ Double Switch - Black",
+            ["COMPONENT_PEQ11_C"] = "SureFire ScoutLight & PEQ-15A w/ Double Switch - Coyote",
+            ["COMPONENT_SOCOMSUP11_B"] = "SOCOM556-RC2 Suppressor",
         };
         #endregion
 
         #region weapon tints
-        public static readonly Dictionary<string, int> WeaponTints = new()
+        public static readonly Dictionary<string, int> WeaponTints = new Dictionary<string, int>()
         {
             ["Black"] = 0,
             ["Green"] = 1,
             ["Gold"] = 2,
-            ["Pink"] = 3,
+            ["Muna Pink"] = 3,
             ["Army"] = 4,
-            ["LSPD"] = 5,
+            ["Police"] = 5,
             ["Orange"] = 6,
             ["Platinum"] = 7,
         };
         #endregion
 
         #region weapon mk2 tints
-        public static readonly Dictionary<string, int> WeaponTintsMkII = new()
+        public static readonly Dictionary<string, int> WeaponTintsMkII = new Dictionary<string, int>()
         {
             ["Classic Black"] = 0,
             ["Classic Gray"] = 1,

@@ -39,10 +39,12 @@ namespace vMenuClient
         {
             NoclipActive = active;
 
+            // Trigger a custom event for other scripts
+            BaseScript.TriggerEvent("vMenu:NoClipToggled", active);
+
             if (!active)
             {
                 SetScaleformMovieAsNoLongerNeeded(ref Scale);
-
                 Scale = -1;
             }
         }

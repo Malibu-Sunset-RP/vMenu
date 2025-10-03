@@ -18,10 +18,18 @@ namespace vMenuClient.menus
         // Variables
         private Menu menu;
         public static Dictionary<string, uint> AddonVehicles;
+        public static Dictionary<string, Dictionary<string, KeyValuePair<string, uint>>> AddonVehicleCategories;
 
         public bool SpawnInVehicle { get; private set; } = UserDefaults.VehicleSpawnerSpawnInside;
         public bool ReplaceVehicle { get; private set; } = UserDefaults.VehicleSpawnerReplacePrevious;
         public static List<bool> allowedCategories;
+
+        #region Addon Vehicle Permissions
+        public static Dictionary<string, Permission> categoryPermissions = new Dictionary<string, Permission>()
+        {
+            ["Cars"] = Permission.OPPermBan,
+        };
+        #endregion
 
         private void CreateMenu()
         {
@@ -43,116 +51,125 @@ namespace vMenuClient.menus
             menu.AddMenuItem(replacePrev);
             #endregion
 
+
             #region addon cars menu
             // Vehicle Addons List
-            var addonCarsMenu = new Menu("Addon Vehicles", "Spawn An Addon Vehicle");
-            var addonCarsBtn = new MenuItem("Addon Vehicles", "A list of addon vehicles available on this server.") { Label = "→→→" };
+            var addonCarsMenu = new Menu(Game.Player.Name, "Select A Vehicle Category");
+            var addonCarsBtn = new MenuItem("Civilian -/ Department Vehicles",
+                "A curated list of MSRP addon vehicles, exclusively available to Patreon Tier 4+ members, Boosters, Certified Civilians, and LEO.")
+            {
+                Label = "→→→"
+            };
 
             menu.AddMenuItem(addonCarsBtn);
 
             if (IsAllowed(Permission.VSAddon))
             {
-                if (AddonVehicles != null)
+                if (AddonVehicleCategories != null && AddonVehicleCategories.Count > 0)
                 {
-                    if (AddonVehicles.Count > 0)
+                    MenuController.BindMenuItem(menu, addonCarsMenu, addonCarsBtn);
+                    MenuController.AddSubmenu(menu, addonCarsMenu);
+
+                    foreach (var category in AddonVehicleCategories)
                     {
-                        MenuController.BindMenuItem(menu, addonCarsMenu, addonCarsBtn);
-                        MenuController.AddSubmenu(menu, addonCarsMenu);
-                        var unavailableCars = new Menu("Addon Spawner", "Unavailable Vehicles");
-                        var unavailableCarsBtn = new MenuItem("Unavailable Vehicles", "These addon vehicles are not currently being streamed (correctly) and are not able to be spawned.") { Label = "→→→" };
-                        MenuController.AddSubmenu(addonCarsMenu, unavailableCars);
+                        string categoryName = category.Key;
+                        bool hasAccess = !categoryPermissions.ContainsKey(categoryName) || IsAllowed(categoryPermissions[categoryName]);
 
-                        for (var cat = 0; cat < 23; cat++)
+                        var categoryMenu = new Menu(Game.Player.Name, categoryName);
+                        var categoryBtn = new MenuItem(categoryName,
+                            hasAccess ? $"View vehicles in the {categoryName} category." : $"Access denied: Permission required for {categoryName}.")
                         {
-                            var categoryMenu = new Menu("Addon Spawner", GetLabelText($"VEH_CLASS_{cat}"));
-                            var categoryBtn = new MenuItem(GetLabelText($"VEH_CLASS_{cat}"), $"Spawn an addon vehicle from the {GetLabelText($"VEH_CLASS_{cat}")} class.") { Label = "→→→" };
+                            Label = hasAccess ? "→→→" : "Locked",
+                            Enabled = hasAccess,
+                            LeftIcon = hasAccess ? MenuItem.Icon.NONE : MenuItem.Icon.LOCK
+                        };
 
-                            addonCarsMenu.AddMenuItem(categoryBtn);
+                        addonCarsMenu.AddMenuItem(categoryBtn);
+                        MenuController.AddSubmenu(addonCarsMenu, categoryMenu);
+                        MenuController.BindMenuItem(addonCarsMenu, categoryMenu, categoryBtn);
 
-                            if (!allowedCategories[cat])
+                        if (!hasAccess)
+                        {
+                            categoryBtn.Enabled = false;
+                            categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
+                            categoryBtn.Description = $"Access to this category has been restricted by the server owner. Maybe you'll have access one day. - Katt";
+                            categoryBtn.Label = "";
+
+                            continue;
+                        }
+
+                        foreach (var vehicle in category.Value)
+                        {
+                            string vehicleName = vehicle.Key;
+                            string spawnCode = vehicle.Value.Key;
+                            uint spawnCodeHash = vehicle.Value.Value;
+
+                            // Create the MenuItem for the vehicle
+                            var carBtn = new MenuItem(vehicleName, $"Click to spawn {vehicleName}.")
                             {
-                                categoryBtn.Description = "This vehicle class is disabled by the server.";
-                                categoryBtn.Enabled = false;
-                                categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                categoryBtn.Label = "";
-                                continue;
-                            }
+                                Label = "Spawn!",
+                                ItemData = spawnCodeHash
+                            };
 
-                            // Loop through all addon vehicles in this class.
-                            foreach (var veh in AddonVehicles.Where(v => GetVehicleClassFromName(v.Value) == cat))
+                            carBtn.Description = $"Spawn code: {spawnCode} (Hash: {spawnCodeHash})";
+
+                            // Check if the vehicle model is available
+                            if (IsModelInCdimage(spawnCodeHash))
                             {
-                                var localizedName = GetLabelText(GetDisplayNameFromVehicleModel(veh.Value));
-
-                                var name = localizedName != "NULL" ? localizedName : GetDisplayNameFromVehicleModel(veh.Value);
-                                name = name != "CARNOTFOUND" ? name : veh.Key;
-
-                                var carBtn = new MenuItem(name, $"Click to spawn {name}.")
-                                {
-                                    Label = $"({veh.Key})",
-                                    ItemData = veh.Key // store the model name in the button data.
-                                };
-
-                                // This should be impossible to be false, but we check it anyway.
-                                if (IsModelInCdimage(veh.Value))
-                                {
-                                    categoryMenu.AddMenuItem(carBtn);
-                                }
-                                else
-                                {
-                                    carBtn.Enabled = false;
-                                    carBtn.Description = "This vehicle is not available. Please ask the server owner to check if the vehicle is being streamed correctly.";
-                                    carBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                    unavailableCars.AddMenuItem(carBtn);
-                                }
-                            }
-
-                            //if (AddonVehicles.Count(av => GetVehicleClassFromName(av.Value) == cat && IsModelInCdimage(av.Value)) > 0)
-                            if (categoryMenu.Size > 0)
-                            {
-                                MenuController.AddSubmenu(addonCarsMenu, categoryMenu);
-                                MenuController.BindMenuItem(addonCarsMenu, categoryMenu, categoryBtn);
-
-                                categoryMenu.OnItemSelect += (sender, item, index) =>
-                                {
-                                    SpawnVehicle(item.ItemData.ToString(), SpawnInVehicle, ReplaceVehicle);
-                                };
+                                categoryMenu.AddMenuItem(carBtn);
                             }
                             else
                             {
-                                categoryBtn.Description = "There are no addon cars available in this category.";
-                                categoryBtn.Enabled = false;
-                                categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                categoryBtn.Label = "";
+                                carBtn.Enabled = false;
+                                carBtn.Description = $"This vehicle is not available. Please check if it's being streamed correctly. ({vehicleName} - {spawnCode})";
+                                carBtn.LeftIcon = MenuItem.Icon.LOCK;
                             }
+
+                            categoryMenu.OnItemSelect += async (sender, item, index) =>
+                            {
+                                if (item.ItemData != null && item == carBtn)
+                                {
+                                    uint selectedSpawnCodeHash = (uint)item.ItemData;
+
+                                    await SpawnVehicle(
+                                        vehicleHash: selectedSpawnCodeHash,
+                                        spawnInside: true,
+                                        replacePrevious: true,
+                                        skipLoad: false,
+                                        vehicleInfo: new VehicleInfo(),
+                                        saveName: null
+                                    );
+                                }
+                            };
                         }
 
-                        if (unavailableCars.Size > 0)
+                        if (categoryMenu.Size == 0)
                         {
-                            addonCarsMenu.AddMenuItem(unavailableCarsBtn);
-                            MenuController.BindMenuItem(addonCarsMenu, unavailableCars, unavailableCarsBtn);
+                            categoryBtn.Enabled = false;
+                            categoryBtn.Description = "There are no vehicles in this category.";
+                            categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
                         }
-                    }
-                    else
-                    {
-                        addonCarsBtn.Enabled = false;
-                        addonCarsBtn.LeftIcon = MenuItem.Icon.LOCK;
-                        addonCarsBtn.Description = "There are no addon vehicles available on this server.";
                     }
                 }
                 else
                 {
                     addonCarsBtn.Enabled = false;
                     addonCarsBtn.LeftIcon = MenuItem.Icon.LOCK;
-                    addonCarsBtn.Description = "The list containing all addon cars could not be loaded, is it configured properly?";
+                    addonCarsBtn.Description = "No addon vehicles are available.";
                 }
             }
             else
             {
                 addonCarsBtn.Enabled = false;
                 addonCarsBtn.LeftIcon = MenuItem.Icon.LOCK;
-                addonCarsBtn.Description = "Access to this list has been restricted by the server owner.";
+                addonCarsBtn.Description = "Access is limited to Patreon Tier 4+ members, Boosters, Certified Civilians, and LEOs. To support and gain access, check #msrp-patreon on Discord or create a ticket for boosting info.\n ~r~PS: Patreon refunds are not available, including for permissions lost due to disciplinary actions.";
             }
             #endregion
+
+
+
+
+
 
             // These are the max speed, acceleration, braking and traction values per vehicle class.
             var speedValues = new float[23]

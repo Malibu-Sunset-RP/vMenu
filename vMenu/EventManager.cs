@@ -1,21 +1,32 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
-
-using CitizenFX.Core;
-
+using MenuAPI;
 using Newtonsoft.Json;
-
+using CitizenFX.Core;
 using vMenuClient.menus;
-
+using static CitizenFX.Core.UI.Screen;
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
 using static vMenuShared.ConfigManager;
 using static vMenuShared.PermissionsManager;
+using System.Xml.Linq;
 
 namespace vMenuClient
 {
+    public class AddonVehicle
+    {
+        public string Name { get; set; }
+        public string SpawnCode { get; set; }
+
+        public AddonVehicle(string name, string spawnCode)
+        {
+            Name = name;
+            SpawnCode = spawnCode;
+        }
+    }
     public class EventManager : BaseScript
     {
         public static WeatherOptions WeatherOptionsMenu { get; private set; }
@@ -24,12 +35,21 @@ namespace vMenuClient
         public static int GetServerHours => MathUtil.Clamp(GetSettingsInt(Setting.vmenu_current_hour), 0, 23);
         public static int GetServerMinuteDuration => GetSettingsInt(Setting.vmenu_ingame_minute_duration);
         public static bool IsServerTimeFrozen => GetSettingsBool(Setting.vmenu_freeze_time);
-        public static bool IsServerTimeSyncedWithMachineTime => GetSettingsBool(Setting.vmenu_sync_to_machine_time);
         public static string GetServerWeather => GetSettingsString(Setting.vmenu_current_weather, "CLEAR");
         public static bool DynamicWeatherEnabled => GetSettingsBool(Setting.vmenu_enable_dynamic_weather);
         public static bool IsBlackoutEnabled => GetSettingsBool(Setting.vmenu_blackout_enabled);
         public static bool IsVehicleLightsEnabled { get; set; } = GetSettingsBool(Setting.vmenu_vehicle_blackout_enabled);
         public static int WeatherChangeTime => MathUtil.Clamp(GetSettingsInt(Setting.vmenu_weather_change_duration), 0, 45);
+        public static bool IsServerTimeSyncedWithMachineTime => GetSettingsBool(Setting.vmenu_sync_to_machine_time);
+        private static bool DontDoTimeSyncRightNow = false;
+        private static bool SmoothTimeTransitionsEnabled => true;
+        public static bool freezeTime = GetSettingsBool(Setting.vmenu_freeze_time);
+        public static int currentHours = 7;
+        public static int currentMinutes = 0;
+        private int currentServerHours = currentHours;
+        private int currentServerMinutes = currentMinutes;
+        private int minuteClockSpeed = 2000;
+        private int minuteTimer = GetGameTimer();
 
         /// <summary>
         /// Constructor.
@@ -44,6 +64,7 @@ namespace vMenuClient
             EventHandlers.Add("vMenu:KillMe", new Action<string>(KillMe));
             EventHandlers.Add("vMenu:Notify", new Action<string>(NotifyPlayer));
             EventHandlers.Add("vMenu:SetClouds", new Action<float, string>(SetClouds));
+            EventHandlers.Add("vMenu:SetTime", new Action<int, int, bool>(SetTime));
             EventHandlers.Add("vMenu:GoodBye", new Action(GoodBye));
             EventHandlers.Add("vMenu:SetBanList", new Action<string>(UpdateBanList));
             EventHandlers.Add("vMenu:ClearArea", new Action<float, float, float>(ClearAreaNearPos));
@@ -66,6 +87,18 @@ namespace vMenuClient
             RegisterNuiCallbackType("disableImportExportNUI");
             RegisterNuiCallbackType("importData");
         }
+
+        [EventHandler("sendPed")]
+        private async void sendPed(string data)
+        {
+            if (MainMenu.MiscSettingsMenu != null)
+            {
+                MainMenu.MpPedCustomizationMenu.currentCharacter = JsonConvert.DeserializeObject<MpPedDataManager.MultiplayerPedData>(data);
+                await MainMenu.MpPedCustomizationMenu.SpawnSavedPed(true);
+                await MainMenu.MpPedCustomizationMenu.SavePed();
+            }
+        }
+
 
         [EventHandler("__cfx_nui:importData")]
         internal void ImportData(IDictionary<string, object> data, CallbackDelegate cb)
@@ -456,9 +489,78 @@ namespace vMenuClient
         /// Updates the teleports locations data from the server side locations.json, because that doesn't update client side on change.
         /// </summary>
         /// <param name="jsonData"></param>
-        private void UpdateTeleportLocations(string jsonData)
-        {
-            MiscSettings.TpLocations = JsonConvert.DeserializeObject<List<vMenuShared.ConfigManager.TeleportLocation>>(jsonData);
-        }
-    }
-}
+
+            // Existing properties and constructor
+
+            // Method to handle update of teleport locations and show player blips
+            private void UpdateTeleportLocations(string jsonData)
+            {
+                bool blips = MainMenu.MiscSettingsMenu.ShowPlayerBlips;
+                bool global = MainMenu.MiscSettingsMenu.ShowGlobalPlayerBlips;
+                TriggerEvent("vMenu:showPlayerBlips", blips, global);
+
+                // Assuming TpLocations is a proper config setup elsewhere
+                MiscSettings.TpLocations = JsonConvert.DeserializeObject<List<vMenuShared.ConfigManager.TeleportLocation>>(jsonData);
+            }
+
+            // Existing methods...
+
+            // Time change with transition
+            private async void SetTime(int newHours, int newMinutes, bool freeze)
+            {
+                // Smooth transition implementation
+                if (SmoothTimeTransitionsEnabled)
+                {
+                    DontDoTimeSyncRightNow = true;
+                    freezeTime = false;
+
+                    var oldSpeed = minuteClockSpeed;
+
+                    // Begin transition
+                    while (currentHours != newHours || currentMinutes != newMinutes)
+                    {
+                        await Delay(10); // Smooth transition delay
+                                         // Adjust the new time gradually
+                        if (currentMinutes < newMinutes)
+                        {
+                            currentMinutes++;
+                        }
+                        else if (currentMinutes > newMinutes)
+                        {
+                            currentMinutes--;
+                        }
+
+                        if (currentHours < newHours && currentMinutes == newMinutes)
+                        {
+                            currentHours++;
+                        }
+                        else if (currentHours > newHours && currentMinutes == newMinutes)
+                        {
+                            currentHours--;
+                        }
+
+                        if (currentMinutes > 59)
+                        {
+                            currentMinutes = 0;
+                            currentHours++;
+                        }
+                        if (currentHours > 23)
+                        {
+                            currentHours = 0;
+                        }
+
+                        NetworkOverrideClockTime(currentHours, currentMinutes, 0);
+                    }
+
+                    minuteClockSpeed = oldSpeed;
+                    DontDoTimeSyncRightNow = false;
+                }
+                else
+                {
+                    // Instantly set the time if transitions are disabled
+                    NetworkOverrideClockTime(newHours, newMinutes, 0);
+                }
+
+                freezeTime = freeze;
+            }
+    }   }

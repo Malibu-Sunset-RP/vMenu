@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 
 using CitizenFX.Core;
@@ -128,7 +129,7 @@ namespace vMenuClient.menus
         private int _eyeColorSelection;
         private int _facialExpressionSelection;
 
-        private MultiplayerPedData currentCharacter = new();
+        public MultiplayerPedData currentCharacter = new();
         private MpCharacterCategory currentCategory = new();
 
         private Ped _clone;
@@ -729,7 +730,7 @@ namespace vMenuClient.menus
         /// Saves the mp character and quits the editor if successful.
         /// </summary>
         /// <returns></returns>
-        private async Task<bool> SavePed()
+        public async Task<bool> SavePed()
         {
             currentCharacter.PedHeadBlendData = Game.PlayerPed.GetHeadBlendData();
             if (isEdidtingPed)
@@ -1306,6 +1307,7 @@ namespace vMenuClient.menus
             #region clothes
             clothesMenu.OnListIndexChange += (_menu, listItem, oldSelectionIndex, newSelectionIndex, realIndex) =>
             {
+                realIndex -= 1;
                 var componentIndex = realIndex + 1;
                 if (realIndex > 0)
                 {
@@ -2153,7 +2155,7 @@ namespace vMenuClient.menus
         /// Character data MUST be set BEFORE calling this function.
         /// </summary>
         /// <returns></returns>
-        private async Task SpawnSavedPed(bool restoreWeapons)
+        public async Task SpawnSavedPed(bool restoreWeapons)
         {
             if (currentCharacter.Version < 1)
             {

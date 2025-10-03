@@ -67,6 +67,7 @@ namespace vMenuClient.menus
         public bool KbRecordKeys { get; private set; } = UserDefaults.KbRecordKeys;
         public bool KbRadarKeys { get; private set; } = UserDefaults.KbRadarKeys;
         public bool KbPointKeys { get; private set; } = UserDefaults.KbPointKeys;
+        public bool ShowGlobalPlayerBlips { get; internal set; }
 
         internal static List<vMenuShared.ConfigManager.TeleportLocation> TpLocations = new();
 

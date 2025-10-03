@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Remoting.Channels;
 
 using CitizenFX.Core;
 
@@ -10,6 +11,7 @@ using vMenuClient.data;
 
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
+using static vMenuClient.data.VehicleData;
 using static vMenuShared.ConfigManager;
 using static vMenuShared.PermissionsManager;
 

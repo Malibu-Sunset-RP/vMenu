@@ -60,6 +60,7 @@ namespace vMenuClient
         private List<Prop> props = new();
         private List<Vehicle> vehicles = new();
         private List<Ped> peds = new();
+        private List<int> incog = new List<int>();
 
         public FunctionsController() { }
 
@@ -76,6 +77,7 @@ namespace vMenuClient
             Tick += MiscSettings;
             Tick += GeneralTasks;
             Tick += GcTick;
+            Tick += Sumting;
 
             if (GetSettingsBool(Setting.keep_player_head_props))
             {
@@ -213,6 +215,7 @@ namespace vMenuClient
             await Delay(1000);
         }
         #endregion
+
 
         #region General Tasks
         /// <summary>
@@ -1203,10 +1206,27 @@ namespace vMenuClient
         #endregion
 
         #region Join / Quit notifications (via events)
-        /// <summary>
-        /// Runs join/quit notification checks.
-        /// </summary>
-        /// <returns></returns>
+
+        [EventHandler("msrp:incog")]
+        private void OnIncog(dynamic table)
+        {
+            // Log the received data for debugging
+
+            // Clear the existing incog list
+            incog.Clear();
+
+            // Iterate through the dynamic ExpandoObject using reflection
+            foreach (var kvp in (IDictionary<string, object>)table)
+            {
+                if (int.TryParse(kvp.Key, out int serverId))
+                {
+                    incog.Add(serverId);
+                }
+            }
+
+            // Log the parsed incog list for verification
+        }
+
         [EventHandler("vMenu:PlayerJoinQuit")]
         internal void OnJoinQuitNotification(string playerName, string dropReason)
         {
@@ -1794,6 +1814,71 @@ namespace vMenuClient
                     ClearCamera();
                     camera = null;
                 }
+            }
+        }
+
+        private async Task Sumting()
+        {
+            while (true)
+            {
+                if (IsDisabledControlJustPressed(0, 121))
+                {
+                    if (MainMenu.MpPedCustomizationMenu.clothesMenu.Visible)
+                    {
+                        // Get user input for List Item Index
+                        string input = await GetUserInput(windowTitle: "Enter Drawable Number to jump to", 3);
+
+                        // Validate the input
+                        if (int.TryParse(input, out int newSelectionIndex))
+                        {
+                            var menuListItem = MainMenu.MpPedCustomizationMenu.clothesMenu.GetCurrentMenuItem();
+                            var realIndex = menuListItem.Index;
+                            // Ensure we are working with MenuListItem
+                            if (menuListItem is MenuListItem listItem)
+                            {
+                                // Set the ListIndex to the new drawable number
+                                listItem.ListIndex = newSelectionIndex;
+
+                                // Adjust for realIndex and skip specific components
+                                //realIndex -= 1;
+                                var componentIndex = realIndex + 1;
+                                if (realIndex > 0)
+                                {
+                                    componentIndex += 1;
+                                }
+
+                                // Get current texture index
+                                var textureIndex = GetPedTextureVariation(Game.PlayerPed.Handle, componentIndex);
+                                var newTextureIndex = 0;
+
+                                // Set the new component variation
+                                SetPedComponentVariation(Game.PlayerPed.Handle, componentIndex, newSelectionIndex, newTextureIndex, 0);
+
+                                // Update the character's drawable variations
+
+                                MainMenu.MpPedCustomizationMenu.currentCharacter.DrawableVariations.clothes ??= new Dictionary<int, KeyValuePair<int, int>>();
+                                var maxTextures = GetNumberOfPedTextureVariations(Game.PlayerPed.Handle, componentIndex, newSelectionIndex);
+                                MainMenu.MpPedCustomizationMenu.currentCharacter.DrawableVariations.clothes[componentIndex] = new KeyValuePair<int, int>(newSelectionIndex, newTextureIndex);
+
+
+
+                                // Refresh the menu to reflect the updated selection
+                                //MainMenu.MpPedCustomizationMenu.clothesMenu.RefreshIndex();
+                                //MainMenu.MpPedCustomizationMenu.clothesMenu.SetSelectedIndex(realIndex);
+                            }
+                        }
+                        else
+                        {
+                            // Notify the user if the input is invalid
+                            Notify.Error("Invalid input. Please enter a valid number.");
+                        }
+                    }
+                }
+
+                await Delay(0);
+
+
+
             }
         }
 
