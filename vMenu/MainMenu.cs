@@ -178,7 +178,12 @@ namespace vMenuClient
             RegisterKeyMapping($"vMenu:{KeyMappingID}:MenuToggle", "vMenu Toggle Button", "keyboard", MenuToggleKey);
             RegisterKeyMapping($"vMenu:{KeyMappingID}:MenuToggle", "vMenu Toggle Button Controller", "pad_digitalbuttonany", "start_index");
             #endregion
-            if (EnableExperimentalFeatures)
+            // Register exports
+            Exports.Add("IsGodModeEnabled", new Func<bool>(IsGodModeEnabled));
+            Exports.Add("IsGodModeHUDDisabled", new Func<bool>(IsGodModeDisabled));
+
+            if (EnableExperimentalFeatures || DebugMode)
+                if (EnableExperimentalFeatures)
             {
                 RegisterCommand("testped", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
                 {
@@ -926,6 +931,40 @@ namespace vMenuClient
 
         #region Utilities
         private static string GetKeyMappingId() => string.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
+        #endregion
+
+        #region Exports
+        /// <summary>
+        /// Export to check if god mode is currently enabled.
+        /// Returns true when god mode is active, false otherwise.
+        /// </summary>
+        /// <returns>True if god mode is enabled, false otherwise.</returns>
+        private bool IsGodModeEnabled()
+        {
+            if (PlayerOptionsMenu == null)
+            {
+                return false;
+            }
+
+            // Return true if god mode is ON and player has permission
+            return PlayerOptionsMenu.PlayerGodMode && IsAllowed(Permission.POGod);
+        }
+
+        /// <summary>
+        /// Export to check if god mode is currently disabled.
+        /// Returns true when god mode is not active, false otherwise.
+        /// </summary>
+        /// <returns>True if god mode is disabled, false otherwise.</returns>
+        private bool IsGodModeDisabled()
+        {
+            if (PlayerOptionsMenu == null)
+            {
+                return true;
+            }
+
+            // Return true if god mode is OFF or player doesn't have permission
+            return !PlayerOptionsMenu.PlayerGodMode || !IsAllowed(Permission.POGod);
+        }
         #endregion
     }
 }
