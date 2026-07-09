@@ -3,17 +3,23 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
+
+using CitizenFX.Core;
+
 using MenuAPI;
+
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 using vMenuClient.data;
 using vMenuClient.menus;
-using static CitizenFX.Core.UI.Screen;
+
 using static CitizenFX.Core.Native.API;
+using static CitizenFX.Core.UI.Screen;
 using static vMenuClient.CommonFunctions;
 using static vMenuShared.ConfigManager;
 using static vMenuShared.PermissionsManager;
-using System.Xml.Linq;
 
 namespace vMenuClient
 {
@@ -129,11 +135,15 @@ namespace vMenuClient
 
         /// <summary>
         /// Sets the addon models from the addons.json file.
+        /// Supports two formats for the "vehicles" key:
+        ///   - Flat list:      "vehicles": ["model1", "model2"]                         (all placed under a default "Cars" category)
+        ///   - Grouped by category: "vehicles": { "Civilian": ["model1"], "LEO": ["model2"] }
         /// </summary>
         private void SetAddons()
         {
             // reset addons
             VehicleSpawner.AddonVehicles = new Dictionary<string, uint>();
+            VehicleSpawner.AddonVehicleCategories = new Dictionary<string, Dictionary<string, uint>>();
             WeaponOptions.AddonWeapons = new Dictionary<string, uint>();
             PlayerAppearance.AddonPeds = new Dictionary<string, uint>();
             MpPedCustomization.ExtraBlendableFaces = [];
@@ -141,29 +151,57 @@ namespace vMenuClient
             var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/addons.json") ?? "{}";
             try
             {
-                // load new addons.
-                var addons = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(jsonData);
+                var root = JObject.Parse(jsonData);
 
-                // load vehicles
-                if (addons.ContainsKey("vehicles"))
+                // load vehicles (flat list OR grouped by category, see summary above)
+                if (root.TryGetValue("vehicles", out var vehiclesToken))
                 {
-                    foreach (var addon in addons["vehicles"])
+                    void AddVehicle(string category, string modelName)
                     {
-                        if (!VehicleSpawner.AddonVehicles.ContainsKey(addon))
+                        if (!VehicleSpawner.AddonVehicles.ContainsKey(modelName))
                         {
-                            VehicleSpawner.AddonVehicles.Add(addon, Game.GenerateHashASCII(addon));
+                            var hash = Game.GenerateHashASCII(modelName);
+                            VehicleSpawner.AddonVehicles.Add(modelName, hash);
+
+                            if (!VehicleSpawner.AddonVehicleCategories.TryGetValue(category, out var categoryDict))
+                            {
+                                categoryDict = new Dictionary<string, uint>();
+                                VehicleSpawner.AddonVehicleCategories[category] = categoryDict;
+                            }
+                            categoryDict.Add(modelName, hash);
                         }
                         else
                         {
-                            Debug.WriteLine($"[vMenu] [Error] Your addons.json file contains 2 or more entries with the same vehicle name! ({addon}) Please remove duplicate lines!");
+                            Debug.WriteLine($"[vMenu] [Error] Your addons.json file contains 2 or more entries with the same vehicle name! ({modelName}) Please remove duplicate lines!");
+                        }
+                    }
+
+                    if (vehiclesToken.Type == JTokenType.Array)
+                    {
+                        // Old / simple format: flat list, no categories -> default them all to "Cars".
+                        foreach (var addon in vehiclesToken.ToObject<List<string>>())
+                        {
+                            AddVehicle("Cars", addon);
+                        }
+                    }
+                    else if (vehiclesToken.Type == JTokenType.Object)
+                    {
+                        // New format: { "CategoryName": ["model1", "model2"], ... }
+                        var grouped = vehiclesToken.ToObject<Dictionary<string, List<string>>>();
+                        foreach (var category in grouped)
+                        {
+                            foreach (var addon in category.Value)
+                            {
+                                AddVehicle(category.Key, addon);
+                            }
                         }
                     }
                 }
 
                 // load weapons
-                if (addons.ContainsKey("weapons"))
+                if (root.TryGetValue("weapons", out var weaponsToken))
                 {
-                    foreach (var addon in addons["weapons"])
+                    foreach (var addon in weaponsToken.ToObject<List<string>>())
                     {
                         if (!WeaponOptions.AddonWeapons.ContainsKey(addon))
                         {
@@ -177,9 +215,9 @@ namespace vMenuClient
                 }
 
                 // load peds.
-                if (addons.ContainsKey("peds"))
+                if (root.TryGetValue("peds", out var pedsToken))
                 {
-                    foreach (var addon in addons["peds"])
+                    foreach (var addon in pedsToken.ToObject<List<string>>())
                     {
                         if (!PlayerAppearance.AddonPeds.ContainsKey(addon))
                         {
@@ -192,9 +230,9 @@ namespace vMenuClient
                     }
                 }
 
-                if (addons.ContainsKey("extra_blendable_faces"))
+                if (root.TryGetValue("extra_blendable_faces", out var facesToken))
                 {
-                    foreach (var addon in addons["extra_blendable_faces"])
+                    foreach (var addon in facesToken.ToObject<List<string>>())
                     {
                         if (!MpPedCustomization.ExtraBlendableFaces.Contains(addon))
                         {
@@ -307,9 +345,9 @@ namespace vMenuClient
                             VehicleOptions.VehicleExtras.Add(modelHash, extras[model]);
                         else
                         {
-                            foreach(int extra in extras[model].Keys)
+                            foreach (int extra in extras[model].Keys)
                             {
-                                if(!VehicleOptions.VehicleExtras[modelHash].ContainsKey(extra))
+                                if (!VehicleOptions.VehicleExtras[modelHash].ContainsKey(extra))
                                     VehicleOptions.VehicleExtras[modelHash].Add(extra, extras[model][extra]);
                                 else
                                     Debug.WriteLine($"[vMenu] [Warning] Your extras.json file contains 2 or more entries with the same extra index! ({model}, Extra {extra}) Please remove duplicate!");
@@ -494,78 +532,79 @@ namespace vMenuClient
         /// Updates the teleports locations data from the server side locations.json, because that doesn't update client side on change.
         /// </summary>
         /// <param name="jsonData"></param>
-
-            // Existing properties and constructor
-
-            // Method to handle update of teleport locations and show player blips
-            private void UpdateTeleportLocations(string jsonData)
+        private void UpdateTeleportLocations(string jsonData)
+        {
+            // MiscSettingsMenu may not be constructed yet when this event arrives right after joining.
+            if (MainMenu.MiscSettingsMenu != null)
             {
                 bool blips = MainMenu.MiscSettingsMenu.ShowPlayerBlips;
                 bool global = MainMenu.MiscSettingsMenu.ShowGlobalPlayerBlips;
                 TriggerEvent("vMenu:showPlayerBlips", blips, global);
-
-                // Assuming TpLocations is a proper config setup elsewhere
-                MiscSettings.TpLocations = JsonConvert.DeserializeObject<List<vMenuShared.ConfigManager.TeleportLocation>>(jsonData);
             }
 
-            // Existing methods...
+            // Assuming TpLocations is a proper config setup elsewhere
+            MiscSettings.TpLocations = JsonConvert.DeserializeObject<List<vMenuShared.ConfigManager.TeleportLocation>>(jsonData);
+        }
 
-            // Time change with transition
-            private async void SetTime(int newHours, int newMinutes, bool freeze)
+        /// <summary>
+        /// Sets the in-game time, optionally with a smooth transition.
+        /// </summary>
+        private async void SetTime(int newHours, int newMinutes, bool freeze)
+        {
+            // Smooth transition implementation
+            if (SmoothTimeTransitionsEnabled)
             {
-                // Smooth transition implementation
-                if (SmoothTimeTransitionsEnabled)
+                DontDoTimeSyncRightNow = true;
+                freezeTime = false;
+
+                var oldSpeed = minuteClockSpeed;
+
+                // Begin transition
+                while (currentHours != newHours || currentMinutes != newMinutes)
                 {
-                    DontDoTimeSyncRightNow = true;
-                    freezeTime = false;
-
-                    var oldSpeed = minuteClockSpeed;
-
-                    // Begin transition
-                    while (currentHours != newHours || currentMinutes != newMinutes)
+                    await Delay(10); // Smooth transition delay
+                                     // Adjust the new time gradually
+                    if (currentMinutes < newMinutes)
                     {
-                        await Delay(10); // Smooth transition delay
-                                         // Adjust the new time gradually
-                        if (currentMinutes < newMinutes)
-                        {
-                            currentMinutes++;
-                        }
-                        else if (currentMinutes > newMinutes)
-                        {
-                            currentMinutes--;
-                        }
-
-                        if (currentHours < newHours && currentMinutes == newMinutes)
-                        {
-                            currentHours++;
-                        }
-                        else if (currentHours > newHours && currentMinutes == newMinutes)
-                        {
-                            currentHours--;
-                        }
-
-                        if (currentMinutes > 59)
-                        {
-                            currentMinutes = 0;
-                            currentHours++;
-                        }
-                        if (currentHours > 23)
-                        {
-                            currentHours = 0;
-                        }
-
-                        NetworkOverrideClockTime(currentHours, currentMinutes, 0);
+                        currentMinutes++;
+                    }
+                    else if (currentMinutes > newMinutes)
+                    {
+                        currentMinutes--;
                     }
 
-                    minuteClockSpeed = oldSpeed;
-                    DontDoTimeSyncRightNow = false;
-                }
-                else
-                {
-                    // Instantly set the time if transitions are disabled
-                    NetworkOverrideClockTime(newHours, newMinutes, 0);
+                    if (currentHours < newHours && currentMinutes == newMinutes)
+                    {
+                        currentHours++;
+                    }
+                    else if (currentHours > newHours && currentMinutes == newMinutes)
+                    {
+                        currentHours--;
+                    }
+
+                    if (currentMinutes > 59)
+                    {
+                        currentMinutes = 0;
+                        currentHours++;
+                    }
+                    if (currentHours > 23)
+                    {
+                        currentHours = 0;
+                    }
+
+                    NetworkOverrideClockTime(currentHours, currentMinutes, 0);
                 }
 
-                freezeTime = freeze;
+                minuteClockSpeed = oldSpeed;
+                DontDoTimeSyncRightNow = false;
             }
-    }   }
+            else
+            {
+                // Instantly set the time if transitions are disabled
+                NetworkOverrideClockTime(newHours, newMinutes, 0);
+            }
+
+            freezeTime = freeze;
+        }
+    }
+}

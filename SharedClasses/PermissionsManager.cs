@@ -446,6 +446,9 @@ namespace vMenuShared
             VCEnable,
             VCShowSpeaker,
             VCStaffChannel,
+            WPCandyCane,
+            WPRailgunXM3,
+            WPAcidPackage,
             #endregion
         };
 

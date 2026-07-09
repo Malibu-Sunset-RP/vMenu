@@ -22,6 +22,10 @@ namespace vMenuClient.menus
         public static Dictionary<string, uint> AddonVehicles;
         public static Dictionary<string, uint> WhitelistVehicles;
 
+        // NEW: vehicles grouped by category name (e.g. "Cars" -> { modelName -> modelHash }).
+        // TODO: populate this wherever AddonVehicles is currently populated.
+        public static Dictionary<string, Dictionary<string, uint>> AddonVehicleCategories;
+
         public bool SpawnInVehicle { get; private set; } = UserDefaults.VehicleSpawnerSpawnInside;
         public bool ReplaceVehicle { get; private set; } = UserDefaults.VehicleSpawnerReplacePrevious;
         public static List<bool> allowedCategories;
@@ -75,6 +79,7 @@ namespace vMenuClient.menus
                     foreach (var category in AddonVehicleCategories)
                     {
                         string categoryName = category.Key;
+                        Dictionary<string, uint> vehiclesInCategory = category.Value;
                         bool hasAccess = !categoryPermissions.ContainsKey(categoryName) || IsAllowed(categoryPermissions[categoryName]);
 
                         var categoryMenu = new Menu(Game.Player.Name, categoryName);
@@ -92,79 +97,66 @@ namespace vMenuClient.menus
 
                         if (!hasAccess)
                         {
-                            categoryBtn.Enabled = false;
-                            categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
-                            categoryBtn.Description = $"Access to this category has been restricted by the server owner. Maybe you'll have access one day. - Katt";
+                            categoryBtn.Description = "Access to this category has been restricted by the server owner. Maybe you'll have access one day. - Katt";
                             categoryBtn.Label = "";
 
                             continue;
                         }
 
-                            // Loop through all addon vehicles in this class.
-                            foreach (var veh in AddonVehicles.Where(v => GetVehicleClassFromName(v.Value) == cat))
+                        // Loop through all addon vehicles in this category.
+                        foreach (var veh in vehiclesInCategory)
+                        {
+                            var localizedName = GetLabelText(GetDisplayNameFromVehicleModel(veh.Value));
+
+                            var name = localizedName != "NULL" ? localizedName : GetDisplayNameFromVehicleModel(veh.Value);
+                            name = name != "CARNOTFOUND" ? name : veh.Key;
+
+                            var carBtn = new MenuItem(name, $"Click to spawn {name}.")
                             {
-                                var localizedName = GetLabelText(GetDisplayNameFromVehicleModel(veh.Value));
+                                Label = $"({veh.Key})",
+                                ItemData = veh.Key // store the model name in the button data.
+                            };
 
-                                var name = localizedName != "NULL" ? localizedName : GetDisplayNameFromVehicleModel(veh.Value);
-                                name = name != "CARNOTFOUND" ? name : veh.Key;
-
-                                var carBtn = new MenuItem(name, $"Click to spawn {name}.")
-                                {
-                                    Label = $"({veh.Key})",
-                                    ItemData = veh.Key // store the model name in the button data.
-                                };
-                                if (WhitelistVehicles.ContainsKey(veh.Key.ToLower()))
-                                {
-                                    if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.Key))
-                                    {
-                                        carBtn.Enabled = false;
-                                        carBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                        carBtn.Description = "Access to this has been restricted by the server owner.";
-                                    }
-                                }
-
-                                // This should be impossible to be false, but we check it anyway.
-                                if (IsModelInCdimage(veh.Value))
-                                {
-                                    categoryMenu.AddMenuItem(carBtn);
-                                }
-                                else
+                            if (WhitelistVehicles.ContainsKey(veh.Key.ToLower()))
+                            {
+                                if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.Key))
                                 {
                                     carBtn.Enabled = false;
-                                    carBtn.Description = "This vehicle is not available. Please ask the server owner to check if the vehicle is being streamed correctly.";
                                     carBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                    unavailableCars.AddMenuItem(carBtn);
+                                    carBtn.Description = "Access to this has been restricted by the server owner.";
                                 }
                             }
 
-                            //if (AddonVehicles.Count(av => GetVehicleClassFromName(av.Value) == cat && IsModelInCdimage(av.Value)) > 0)
-                            if (categoryMenu.Size > 0)
+                            // This should be impossible to be false, but we check it anyway.
+                            if (IsModelInCdimage(veh.Value))
                             {
-                                MenuController.AddSubmenu(addonCarsMenu, categoryMenu);
-                                MenuController.BindMenuItem(addonCarsMenu, categoryMenu, categoryBtn);
-
-                                categoryMenu.OnItemSelect += async (sender, item, index) =>
-                                {
-                                    if (item.ItemData is string modelName)
-                                    {
-                                        await SpawnVehicle(modelName, SpawnInVehicle, ReplaceVehicle);
-                                    }
-                                };
+                                categoryMenu.AddMenuItem(carBtn);
                             }
                             else
                             {
-                                categoryBtn.Description = "There are no addon cars available in this category.";
-                                categoryBtn.Enabled = false;
-                                categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
-                                categoryBtn.Label = "";
+                                carBtn.Enabled = false;
+                                carBtn.Description = "This vehicle is not available. Please ask the server owner to check if the vehicle is being streamed correctly.";
+                                carBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                categoryMenu.AddMenuItem(carBtn);
                             }
                         }
 
-                        if (categoryMenu.Size == 0)
+                        if (categoryMenu.Size > 0)
                         {
+                            categoryMenu.OnItemSelect += async (sender, item, index) =>
+                            {
+                                if (item.ItemData is string modelName)
+                                {
+                                    await SpawnVehicle(modelName, SpawnInVehicle, ReplaceVehicle);
+                                }
+                            };
+                        }
+                        else
+                        {
+                            categoryBtn.Description = "There are no addon cars available in this category.";
                             categoryBtn.Enabled = false;
-                            categoryBtn.Description = "There are no vehicles in this category.";
                             categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
+                            categoryBtn.Label = "";
                         }
                     }
                 }
@@ -182,10 +174,6 @@ namespace vMenuClient.menus
                 addonCarsBtn.Description = "Access is limited to Patreon Tier 4+ members, Boosters, Certified Civilians, and LEOs. To support and gain access, check #msrp-patreon on Discord or create a ticket for boosting info.\n ~r~PS: Patreon refunds are not available, including for permissions lost due to disciplinary actions.";
             }
             #endregion
-
-
-
-
 
 
             // These are the max speed, acceleration, braking and traction values per vehicle class.
@@ -378,7 +366,7 @@ namespace vMenuClient.menus
                                     ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
                                 };
                                 vehicleClassMenu.AddMenuItem(vehBtn);
-                                
+
                                 if (WhitelistVehicles.ContainsKey(veh.ToLower()))
                                 {
                                     if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.ToLower()))
@@ -400,7 +388,7 @@ namespace vMenuClient.menus
                                 vehicleClassMenu.AddMenuItem(vehBtn);
                                 vehBtn.RightIcon = MenuItem.Icon.LOCK;
                             }
-                            
+
                             // Mark duplicate as true and break from the loop because we already found the duplicate.
                             duplicate = true;
                             break;
@@ -419,7 +407,7 @@ namespace vMenuClient.menus
                                 ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
                             };
                             vehicleClassMenu.AddMenuItem(vehBtn);
-                            
+
                             if (WhitelistVehicles.ContainsKey(veh.ToLower()))
                             {
                                 if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.ToLower()))
