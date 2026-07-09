@@ -10,6 +10,8 @@ using Newtonsoft.Json;
 
 using vMenuClient.menus;
 
+using vMenuShared;
+
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
 using static vMenuShared.ConfigManager;
@@ -23,6 +25,7 @@ namespace vMenuClient
 
         public static bool PermissionsSetupComplete => ArePermissionsSetup;
         public static bool ConfigOptionsSetupComplete = false;
+        public static bool AddonPermissionSetup = false;
 
         public static string MenuToggleKey { get; private set; } = "M"; // M by default
         public static string NoClipKey { get; private set; } = "F2"; // F2 by default 
@@ -120,7 +123,7 @@ namespace vMenuClient
             }
             #endregion
             #region keymapping
-            string KeyMappingID = String.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
+            string KeyMappingID = GetKeyMappingId();
             RegisterCommand($"vMenu:{KeyMappingID}:NoClip", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
             {
                 if (IsAllowed(Permission.NoClip))
@@ -144,18 +147,12 @@ namespace vMenuClient
                     }
                 }
             }), false);
-            RegisterCommand($"vMenu:{KeyMappingID}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
+            
+            RegisterCommand("vMenu:DV", new Action<dynamic, List<dynamic>, string>((source, args, rawCommand) =>
             {
-                if (MenuEnabled)
+                if (IsAllowed(Permission.VODelete))
                 {
-                    if (!MenuController.IsAnyMenuOpen())
-                    {
-                        Menu.OpenMenu();
-                    }
-                    else
-                    {
-                        MenuController.CloseAllMenus();
-                    }
+                    DeleteVehicle();
                 }
             }), false);
 
@@ -198,11 +195,6 @@ namespace vMenuClient
                         Debug.WriteLine("check");
                         Debug.Write(JsonConvert.SerializeObject(d, Formatting.Indented) + "\n");
                     }
-                }), false);
-
-                RegisterCommand("clearfocus", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
-                {
-                    SetNuiFocus(false, false);
                 }), false);
             }
 
@@ -340,29 +332,13 @@ namespace vMenuClient
             // Clear all previous pause menu info/brief messages on resource start.
             ClearBrief();
 
-            // Request the permissions data from the server.
-            TriggerServerEvent("vMenu:RequestPermissions");
-
-            // Request server state from the server.
-            TriggerServerEvent("vMenu:RequestServerState");
-        }
-
-        #region Infinity bits
-        [EventHandler("vMenu:SetServerState")]
-        public void SetServerState(IDictionary<string, object> data)
-        {
-            if (data.TryGetValue("IsInfinity", out var isInfinity))
+            if (GlobalState.Get("vmenu_onesync") is bool value && value)
             {
-                if (isInfinity is bool isInfinityBool)
-                {
-                    if (isInfinityBool)
-                    {
-                        PlayersList = new InfinityPlayerList(Players);
-                    }
-                }
+                PlayersList = new InfinityPlayerList(Players);
             }
         }
 
+        #region Infinity bits
         [EventHandler("vMenu:ReceivePlayerList")]
         public void ReceivedPlayerList(IList<object> players)
         {
@@ -412,7 +388,19 @@ namespace vMenuClient
             return coords;
         }
         #endregion
+        #region Set Permissions function
+        /// <summary>
+        /// Set the permissions for this client.
+        /// </summary>
+        /// <param name="dict"></param>
+        public static void SetSupplementaryPermissions(string permissionsList)
+        {
+            vMenuShared.SupplementaryPermissionManager.SetPermissions(permissionsList);
 
+            AddonPermissionSetup = true;
+            SupplementaryPermissionManager.ArePermissionsSetup = true;
+        }
+        #endregion
         #region Set Permissions function
         /// <summary>
         /// Set the permissions for this client.
@@ -449,7 +437,7 @@ namespace vMenuClient
                 IsAllowed(Permission.VSOpenWheel, checkAnyway: true)
             };
             ArePermissionsSetup = true;
-            while (!ConfigOptionsSetupComplete)
+            while (!ConfigOptionsSetupComplete && !AddonPermissionSetup)
             {
                 await Delay(100);
             }
@@ -523,22 +511,37 @@ namespace vMenuClient
                 // Manage Stamina
                 if (PlayerOptionsMenu != null && PlayerOptionsMenu.PlayerStamina && IsAllowed(Permission.POUnlimitedStamina))
                 {
-                    StatSetInt((uint)GetHashKey("MP0_STAMINA"), 100, true);
+                    StatSetInt(Game.GenerateHashASCII("MP0_STAMINA"), 100, true);
                 }
                 else
                 {
-                    StatSetInt((uint)GetHashKey("MP0_STAMINA"), 0, true);
+                    StatSetInt(Game.GenerateHashASCII("MP0_STAMINA"), 0, true);
                 }
 
                 // Manage other stats, in order of appearance in the pause menu (stats) page.
-                StatSetInt((uint)GetHashKey("MP0_SHOOTING_ABILITY"), 100, true);        // Shooting
-                StatSetInt((uint)GetHashKey("MP0_STRENGTH"), 100, true);                // Strength
-                StatSetInt((uint)GetHashKey("MP0_STEALTH_ABILITY"), 100, true);         // Stealth
-                StatSetInt((uint)GetHashKey("MP0_FLYING_ABILITY"), 100, true);          // Flying
-                StatSetInt((uint)GetHashKey("MP0_WHEELIE_ABILITY"), 100, true);         // Driving
-                StatSetInt((uint)GetHashKey("MP0_LUNG_CAPACITY"), 100, true);           // Lung Capacity
-                StatSetFloat((uint)GetHashKey("MP0_PLAYER_MENTAL_STATE"), 0f, true);    // Mental State
+                StatSetInt(Game.GenerateHashASCII("MP0_SHOOTING_ABILITY"), 100, true);        // Shooting
+                StatSetInt(Game.GenerateHashASCII("MP0_STRENGTH"), 100, true);                // Strength
+                StatSetInt(Game.GenerateHashASCII("MP0_STEALTH_ABILITY"), 100, true);         // Stealth
+                StatSetInt(Game.GenerateHashASCII("MP0_FLYING_ABILITY"), 100, true);          // Flying
+                StatSetInt(Game.GenerateHashASCII("MP0_WHEELIE_ABILITY"), 100, true);         // Driving
+                StatSetInt(Game.GenerateHashASCII("MP0_LUNG_CAPACITY"), 100, true);           // Lung Capacity
+                StatSetFloat(Game.GenerateHashASCII("MP0_PLAYER_MENTAL_STATE"), 0f, true);    // Mental State
             }
+
+            RegisterCommand($"vMenu:{GetKeyMappingId()}:MenuToggle", new Action<dynamic, List<dynamic>, string>((dynamic source, List<dynamic> args, string rawCommand) =>
+            {
+                if (MenuEnabled)
+                {
+                    if (!MenuController.IsAnyMenuOpen())
+                    {
+                        Menu.OpenMenu();
+                    }
+                    else
+                    {
+                        MenuController.CloseAllMenus();
+                    }
+                }
+            }), false);
 
             TriggerEvent("vMenu:SetupTickFunctions");
         }
@@ -919,6 +922,10 @@ namespace vMenuClient
                 MenuController.EnableMenuToggleKeyOnController = !MiscSettingsMenu.MiscDisableControllerSupport;
             }
         }
+        #endregion
+
+        #region Utilities
+        private static string GetKeyMappingId() => string.IsNullOrWhiteSpace(GetSettingsString(Setting.vmenu_keymapping_id)) ? "Default" : GetSettingsString(Setting.vmenu_keymapping_id);
         #endregion
     }
 }

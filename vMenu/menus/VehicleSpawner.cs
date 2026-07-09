@@ -7,6 +7,8 @@ using MenuAPI;
 
 using vMenuClient.data;
 
+using vMenuShared;
+
 using static CitizenFX.Core.Native.API;
 using static vMenuClient.CommonFunctions;
 using static vMenuShared.PermissionsManager;
@@ -18,7 +20,7 @@ namespace vMenuClient.menus
         // Variables
         private Menu menu;
         public static Dictionary<string, uint> AddonVehicles;
-        public static Dictionary<string, Dictionary<string, KeyValuePair<string, uint>>> AddonVehicleCategories;
+        public static Dictionary<string, uint> WhitelistVehicles;
 
         public bool SpawnInVehicle { get; private set; } = UserDefaults.VehicleSpawnerSpawnInside;
         public bool ReplaceVehicle { get; private set; } = UserDefaults.VehicleSpawnerReplacePrevious;
@@ -98,49 +100,64 @@ namespace vMenuClient.menus
                             continue;
                         }
 
-                        foreach (var vehicle in category.Value)
-                        {
-                            string vehicleName = vehicle.Key;
-                            string spawnCode = vehicle.Value.Key;
-                            uint spawnCodeHash = vehicle.Value.Value;
-
-                            // Create the MenuItem for the vehicle
-                            var carBtn = new MenuItem(vehicleName, $"Click to spawn {vehicleName}.")
+                            // Loop through all addon vehicles in this class.
+                            foreach (var veh in AddonVehicles.Where(v => GetVehicleClassFromName(v.Value) == cat))
                             {
-                                Label = "Spawn!",
-                                ItemData = spawnCodeHash
-                            };
+                                var localizedName = GetLabelText(GetDisplayNameFromVehicleModel(veh.Value));
 
-                            carBtn.Description = $"Spawn code: {spawnCode} (Hash: {spawnCodeHash})";
+                                var name = localizedName != "NULL" ? localizedName : GetDisplayNameFromVehicleModel(veh.Value);
+                                name = name != "CARNOTFOUND" ? name : veh.Key;
 
-                            // Check if the vehicle model is available
-                            if (IsModelInCdimage(spawnCodeHash))
+                                var carBtn = new MenuItem(name, $"Click to spawn {name}.")
+                                {
+                                    Label = $"({veh.Key})",
+                                    ItemData = veh.Key // store the model name in the button data.
+                                };
+                                if (WhitelistVehicles.ContainsKey(veh.Key.ToLower()))
+                                {
+                                    if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.Key))
+                                    {
+                                        carBtn.Enabled = false;
+                                        carBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                        carBtn.Description = "Access to this has been restricted by the server owner.";
+                                    }
+                                }
+
+                                // This should be impossible to be false, but we check it anyway.
+                                if (IsModelInCdimage(veh.Value))
+                                {
+                                    categoryMenu.AddMenuItem(carBtn);
+                                }
+                                else
+                                {
+                                    carBtn.Enabled = false;
+                                    carBtn.Description = "This vehicle is not available. Please ask the server owner to check if the vehicle is being streamed correctly.";
+                                    carBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                    unavailableCars.AddMenuItem(carBtn);
+                                }
+                            }
+
+                            //if (AddonVehicles.Count(av => GetVehicleClassFromName(av.Value) == cat && IsModelInCdimage(av.Value)) > 0)
+                            if (categoryMenu.Size > 0)
                             {
-                                categoryMenu.AddMenuItem(carBtn);
+                                MenuController.AddSubmenu(addonCarsMenu, categoryMenu);
+                                MenuController.BindMenuItem(addonCarsMenu, categoryMenu, categoryBtn);
+
+                                categoryMenu.OnItemSelect += async (sender, item, index) =>
+                                {
+                                    if (item.ItemData is string modelName)
+                                    {
+                                        await SpawnVehicle(modelName, SpawnInVehicle, ReplaceVehicle);
+                                    }
+                                };
                             }
                             else
                             {
-                                carBtn.Enabled = false;
-                                carBtn.Description = $"This vehicle is not available. Please check if it's being streamed correctly. ({vehicleName} - {spawnCode})";
-                                carBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                categoryBtn.Description = "There are no addon cars available in this category.";
+                                categoryBtn.Enabled = false;
+                                categoryBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                categoryBtn.Label = "";
                             }
-
-                            categoryMenu.OnItemSelect += async (sender, item, index) =>
-                            {
-                                if (item.ItemData != null && item == carBtn)
-                                {
-                                    uint selectedSpawnCodeHash = (uint)item.ItemData;
-
-                                    await SpawnVehicle(
-                                        vehicleHash: selectedSpawnCodeHash,
-                                        spawnInside: true,
-                                        replacePrevious: true,
-                                        skipLoad: false,
-                                        vehicleInfo: new VehicleInfo(),
-                                        saveName: null
-                                    );
-                                }
-                            };
                         }
 
                         if (categoryMenu.Size == 0)
@@ -319,7 +336,7 @@ namespace vMenuClient.menus
                     // Get the localized vehicle name, if it's "NULL" (no label found) then use the "properCasedModelName" created above.
                     var vehName = GetVehDisplayNameFromModel(veh) != "NULL" ? GetVehDisplayNameFromModel(veh) : properCasedModelName;
                     var vehModelName = veh;
-                    var model = (uint)GetHashKey(vehModelName);
+                    var model = Game.GenerateHashASCII(vehModelName);
 
                     var topSpeed = Map(GetVehicleModelEstimatedMaxSpeed(model), 0f, speedValues[vehClass], 0f, 1f);
                     var acceleration = Map(GetVehicleModelAcceleration(model), 0f, accelerationValues[vehClass], 0f, 1f);
@@ -361,6 +378,16 @@ namespace vMenuClient.menus
                                     ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
                                 };
                                 vehicleClassMenu.AddMenuItem(vehBtn);
+                                
+                                if (WhitelistVehicles.ContainsKey(veh.ToLower()))
+                                {
+                                    if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.ToLower()))
+                                    {
+                                        vehBtn.Enabled = false;
+                                        vehBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                        vehBtn.Description = "Access to this has been restricted by the server owner.";
+                                    }
+                                }
                             }
                             else
                             {
@@ -373,7 +400,7 @@ namespace vMenuClient.menus
                                 vehicleClassMenu.AddMenuItem(vehBtn);
                                 vehBtn.RightIcon = MenuItem.Icon.LOCK;
                             }
-
+                            
                             // Mark duplicate as true and break from the loop because we already found the duplicate.
                             duplicate = true;
                             break;
@@ -392,6 +419,16 @@ namespace vMenuClient.menus
                                 ItemData = new float[4] { topSpeed, acceleration, maxBraking, maxTraction }
                             };
                             vehicleClassMenu.AddMenuItem(vehBtn);
+                            
+                            if (WhitelistVehicles.ContainsKey(veh.ToLower()))
+                            {
+                                if (!SupplementaryPermissionManager.IsAllowed("VW" + veh.ToLower()))
+                                {
+                                    vehBtn.Enabled = false;
+                                    vehBtn.LeftIcon = MenuItem.Icon.LOCK;
+                                    vehBtn.Description = "Access to this has been restricted by the server owner.";
+                                }
+                            }
                         }
                         else
                         {

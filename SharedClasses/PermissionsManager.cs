@@ -28,6 +28,7 @@ namespace vMenuShared
             OPTeleport,
             OPWaypoint,
             OPSpectate,
+            OPSendMessage,
             OPIdentifiers,
             OPSummon,
             OPKill,
@@ -105,12 +106,14 @@ namespace vMenuShared
             VOInfiniteFuel,
             VOFlares,
             VOPlaneBombs,
+            VOBypassExtraDamage,
             #endregion
 
             // Vehicle Spawner
             #region vehicle spawner
             VSMenu,
             VSAll,
+            VSBypassRateLimit,
             VSDisableReplacePrevious,
             VSSpawnByName,
             VSAddon,
@@ -399,6 +402,8 @@ namespace vMenuShared
             WPdd16_b, //Addon Weapon
             WPdd16_od, //Addon Weapon
             WPdd16_c, //Addon Weapon
+            // MP2025_02 DLC (V 3717)
+            WPNewspaper,
             #endregion
 
             // Weapon Loadouts Menu
@@ -454,9 +459,16 @@ namespace vMenuShared
         /// </summary>
         /// <param name="permission"></param>
         /// <param name="source"></param>
-        /// <param name="checkAnyway">if true, then the permissions will be checked even if they aren't setup yet.</param>
         /// <returns></returns>
         public static bool IsAllowed(Permission permission, Player source) => IsAllowedServer(permission, source);
+
+        /// <summary>
+        /// Public function to check if a permission is allowed.
+        /// </summary>
+        /// <param name="permission"></param>
+        /// <param name="playerHandle"></param>
+        /// <returns></returns>
+        public static bool IsAllowed(Permission permission, string playerHandle) => IsAllowedServer(permission, playerHandle);
 #endif
 
 #if CLIENT
@@ -525,11 +537,22 @@ namespace vMenuShared
                 return false;
             }
 
-            if (IsPlayerAceAllowed(source.Handle, GetAceName(permission)))
+            return IsAllowedServer(permission, source.Handle);
+        }
+
+        /// <summary>
+        /// Checks if the player is allowed that specific permission.
+        /// </summary>
+        /// <param name="permission"></param>
+        /// <param name="playerHandle"></param>
+        /// <returns></returns>
+        private static bool IsAllowedServer(Permission permission, string playerHandle)
+        {
+            if (!DoesPlayerExist(playerHandle))
             {
-                return true;
+                return false;
             }
-            return false;
+            return GetPermissionAndParentPermissions(permission).Any(p => IsPlayerAceAllowed(playerHandle, GetAceName(p)));
         }
 #endif
 

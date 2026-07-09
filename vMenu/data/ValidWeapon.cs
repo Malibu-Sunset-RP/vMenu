@@ -85,39 +85,36 @@ namespace vMenuClient
             WeaponDetails();
             foreach (var weapon in weaponNames)
             {
-                if (!string.IsNullOrEmpty(weapon.Key) && !string.IsNullOrEmpty(weapon.Value))
+                var realName = weapon.Key;
+                var localizedName = weapon.Value;
+                if (realName == "weapon_unarmed") continue;
+                var hash = Game.GenerateHashASCII(realName);
+                var componentHashes = new Dictionary<string, uint>();
+                var weaponComponents = GetWeaponComponents();
+                var weaponComponentKeys = weaponComponents.Keys;
+                foreach (var comp in weaponComponentKeys)
                 {
-                    string realName = weapon.Key;
-                    string localizedName = weapon.Value;
-                    if (realName != "weapon_unarmed")
+                    var componentHash = Game.GenerateHashASCII(comp);
+                    if (DoesWeaponTakeWeaponComponent(hash, componentHash))
                     {
-                        uint hash = (uint)GetHashKey(weapon.Key);
-                        Dictionary<string, uint> componentHashes = new Dictionary<string, uint>();
-                        foreach (var comp in GetWeaponComponents().Keys)
+                        var componentName = weaponComponents[comp];
+                        if (!componentHashes.ContainsKey(componentName))
                         {
-                            if (DoesWeaponTakeWeaponComponent(hash, (uint)GetHashKey(comp)))
-                            {
-                                if (!componentHashes.ContainsKey(GetWeaponComponents()[comp]))
-                                {
-                                    componentHashes.Add(GetWeaponComponents()[comp], (uint)GetHashKey(comp));
-                                }
-                            }
-                        }
-                        ValidWeapon vw = new ValidWeapon()
-                        {
-                            Hash = hash,
-                            SpawnName = realName,
-                            Name = localizedName,
-                            Components = componentHashes,
-                            Perm = weaponPermissions[realName]
-                        };
-                        if (!_weaponsList.Contains(vw))
-                        {
-                            _weaponsList.Add(vw);
+                            componentHashes[componentName] = componentHash;
                         }
                     }
-
-
+                }
+                var vw = new ValidWeapon
+                {
+                    Hash = hash,
+                    SpawnName = realName,
+                    Name = localizedName,
+                    Components = componentHashes,
+                    Perm = weaponPermissions[realName]
+                };
+                if (!_weaponsList.Contains(vw))
+                {
+                    _weaponsList.Add(vw);
                 }
             }
         }
@@ -331,6 +328,8 @@ namespace vMenuClient
                 { "weapon_dd16_b", "SOG DDM4V7 16 Black" },
                 { "weapon_dd16_od", "SOG DDM4V7 16 OD" },
                 { "weapon_dd16_c", "SOG DDM4V7 16 Coyote" },
+            // MP2025_02 DLC (V 3717)
+            { "weapon_newspaper", GetLabelText("WTD_NEWSPAPER") },
         };
 
         // Set weapon names
@@ -543,6 +542,8 @@ namespace vMenuClient
                 { "weapon_dd16_b", "SOG DDM4V7 16 Black" },
                 { "weapon_dd16_od", "SOG DDM4V7 16 OD" },
                 { "weapon_dd16_c", "SOG DDM4V7 16 Coyote" },
+                            // MP2025_02 DLC (V 3717)
+            { "weapon_newspaper", GetLabelText("WT_NEWSPAPER") },
             };
         }
 
@@ -661,87 +662,21 @@ namespace vMenuClient
             // MP Sum (2699)
             ["weapon_emplauncher"] = Permission.WPEMPLauncher,
             ["weapon_precisionrifle"] = Permission.WPPrecisionRifle,
-            ["weapon_tacticalrifle"] = Permission.WPTacticalRifle,
-            // MP Christmas 3 (2802)
-            ["WEAPON_ACIDPACKAGE"] = Permission.WPAcidpackage,
-            ["WEAPON_CANDYCANE"] = Permission.WPCandycane,
-            ["WEAPON_PISTOLXM3"] = Permission.WPPistolXM3,
-            ["WEAPON_RAILGUNXM3"] = Permission.WPRAILGUN2,
-            // MP 2023_01 (2944)
-            ["WEAPON_TECPISTOL"] = Permission.WPTecPistol,
-            // MP 2023_02 (3095)
-            ["WEAPON_BATTLERIFLE"] = Permission.WPBattleRifle,
-            ["WEAPON_SNOWLAUNCHER"] = Permission.WPSnowLauncher,
-            ["WEAPON_HACKINGDEVICE"] = Permission.WPHackingDevice,
-            // MP 2024 (3258)
-            ["WEAPON_STUNROD"] = Permission.WPStunRod,
-            //Addon Rifle
-            ["weapon_navycarbine"] = Permission.WPNavyCrbn,
-            ["weapon_precisioncarbine"] = Permission.WPPrecCrbn,
-            ["weapon_m4"] = Permission.WPM4,
-            ["weapon_mk18b"] = Permission.WPMK18,
-            ["weapon_fbiarb"] = Permission.WPFBIARB,
-            ["weapon_stunshotgun"] = Permission.WPStunshotgun,
-            ["weapon_tacticalcarbine"] = Permission.WPTacticalcarbine,
-            ["weapon_protorifle"] = Permission.WPProtorifle,
-            ["weapon_flashbang"] = Permission.WPFlashbang,
-            ["weapon_smok2grenade"] = Permission.WPSmokeGrenade2,
-            ["weapon_grenadelauncher_smoke"] = Permission.WPGrenadeLauncherSmoke,
-            ["weapon_snubrevolver"] = Permission.WPSnubRevolver,
-            ["weapon_pdbeatstick"] = Permission.WPNightstick2,
-            ["weapon_taser"] = Permission.WPTaser,
-            ["weapon_taser_black"] = Permission.WPTaserblack,
-            ["weapon_taser_lapd"] = Permission.WPTaserlapd,
-            ["weapon_combatpistol2"] = Permission.WPCombatPistol2,
-            ["weapon_combatpistol3"] = Permission.WPCombatPistol3,
-            ["weapon_pepperspray"] = Permission.WPPepperSpray,
-            ["WEAPON_ANTIDOTE"] = Permission.WPAntidote,
-            ["weapon_combatrifle"] = Permission.WPCMBTRFL,
-            ["weapon_scarh"] = Permission.WPMKSMN3,
-            ["weapon_hk416"] = Permission.WPHK416,
-            ["weapon_hk416_anpeq"] = Permission.WPHK416ANPEQ,
-            ["weapon_stealthcarbine"] = Permission.WPStealthCarbine,
-            ["weapon_m4a1"] = Permission.WPM4A1,
-            ["weapon_m4a2"] = Permission.WPM4A2,
-            ["weapon_m4a3"] = Permission.WPM4A3,
-            ["WEAPON_M6IC"] = Permission.WPM6IC,
-            ["WEAPON_VICTUSXMR"] = Permission.WPXMR,
-            ["WEAPON_MOSSBERG"] = Permission.WPMossberg,
-            //M110 Family
-            ["WEAPON_M110"] = Permission.WPM110,
-            ["WEAPON_M110_1"] = Permission.WPM1101,
-            ["WEAPON_M110_2"] = Permission.WPM1102,
-            //HK417
-            ["WEAPON_HK417"] = Permission.WPHK417,
-            // Marko Mods Weapons
-            ["weapon_g17"] = Permission.WPG17,
-            ["weapon_m870"] = Permission.WPM870,
-            ["weapon_mk18"] = Permission.WPMK182,
-            ["weapon_mpx"] = Permission.WPMPX,
-            ["weapon_pp19"] = Permission.WPPP19,
-            ["WEAPON_P320a"] = Permission.WPP320a,
-            ["WEAPON_P320b"] = Permission.WPP320b,
-            ["WEAPON_M4A1FM"] = Permission.WPM4A1FM,
-            ["WEAPON_COLBATON"] = Permission.WPColBaton,
-            ["WEAPON_DIGISCANNER"] = Permission.WPLaser,
-            ["WEAPON_M4NEW"] = Permission.WPM4New,
-            ["WEAPON_M107"] = Permission.WPM07,
-            ["WEAPON_MILITARYCARBINE"] = Permission.WPMTLCBN,
-            ["WEAPON_SNIPERRIFLE2"] = Permission.WPM40,
-            ["WEAPON_ASSAULTSNIPER"] = Permission.WPASSNPR,
-            ["WEAPON_MP7"] = Permission.WPMP7,
-            ["WEAPON_LBRS"] = Permission.WPLBRS,
-            ["WEAPON_FBI19M"] = Permission.WPFBI19M,
-            ["WEAPON_FBIMK4"] = Permission.WPFBIMK4,
-            ["weapon_dd11_b"] = Permission.WPdd11_b,
-            ["weapon_dd11_od"] = Permission.WPdd11_od,
-            ["weapon_dd11_c"] = Permission.WPdd11_c,
-            ["weapon_dd14_b"] = Permission.WPdd14_b,
-            ["weapon_dd14_od"] = Permission.WPdd14_od,
-            ["weapon_dd14_c"] = Permission.WPdd14_c,
-            ["weapon_dd16_b"] = Permission.WPdd16_b,
-            ["weapon_dd16_od"] = Permission.WPdd16_od,
-            ["weapon_dd16_c"] = Permission.WPdd16_c,
+            // MPCHRISTMAS3 DLC (V 2802)
+            ["weapon_pistolxm3"] = Permission.WPPistolXM3,
+            ["weapon_candycane"] = Permission.WPCandyCane,
+            ["weapon_railgunxm3"] = Permission.WPRailgunXM3,
+            ["weapon_acidpackage"] = Permission.WPAcidPackage,
+            // MP2023_01 DLC (V 2944)
+            ["weapon_tecpistol"] = Permission.WPTecPistol,
+            // MP2023_02 DLC (V 3095)
+            ["weapon_battlerifle"] = Permission.WPBattleRifle,
+            ["weapon_snowlauncher"] = Permission.WPSnowLauncher,
+            ["weapon_hackingdevice"] = Permission.WPHackingDevice,
+            // MP2024_01 DLC (V 3258)
+            ["weapon_stunrod"] = Permission.WPStunRod,
+                        // MP2025_02 DLC (V 3717)
+            ["weapon_newspaper"] = Permission.WPNewspaper,
         };
         #endregion
 

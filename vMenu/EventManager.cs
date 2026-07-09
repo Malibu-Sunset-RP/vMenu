@@ -5,7 +5,8 @@ using System.Text;
 using System.Threading.Tasks;
 using MenuAPI;
 using Newtonsoft.Json;
-using CitizenFX.Core;
+
+using vMenuClient.data;
 using vMenuClient.menus;
 using static CitizenFX.Core.UI.Screen;
 using static CitizenFX.Core.Native.API;
@@ -38,7 +39,7 @@ namespace vMenuClient
         public static string GetServerWeather => GetSettingsString(Setting.vmenu_current_weather, "CLEAR");
         public static bool DynamicWeatherEnabled => GetSettingsBool(Setting.vmenu_enable_dynamic_weather);
         public static bool IsBlackoutEnabled => GetSettingsBool(Setting.vmenu_blackout_enabled);
-        public static bool IsVehicleLightsEnabled { get; set; } = GetSettingsBool(Setting.vmenu_vehicle_blackout_enabled);
+        public static bool IsVehicleLightsEnabled => GetSettingsBool(Setting.vmenu_vehicle_blackout_enabled);
         public static int WeatherChangeTime => MathUtil.Clamp(GetSettingsInt(Setting.vmenu_weather_change_duration), 0, 45);
         public static bool IsServerTimeSyncedWithMachineTime => GetSettingsBool(Setting.vmenu_sync_to_machine_time);
         private static bool DontDoTimeSyncRightNow = false;
@@ -60,17 +61,16 @@ namespace vMenuClient
             EventHandlers.Add("vMenu:SetAddons", new Action(SetConfigOptions)); // DEPRECATED: Backwards-compatible event handler; use 'vMenu:SetConfigOptions' instead
             EventHandlers.Add("vMenu:SetConfigOptions", new Action(SetConfigOptions));
             EventHandlers.Add("vMenu:SetPermissions", new Action<string>(MainMenu.SetPermissions));
-            EventHandlers.Add("vMenu:GoToPlayer", new Action<string>(SummonPlayer));
+            EventHandlers.Add("vMenu:SetSupplementaryPermissions", new Action<string>(MainMenu.SetSupplementaryPermissions));
             EventHandlers.Add("vMenu:KillMe", new Action<string>(KillMe));
             EventHandlers.Add("vMenu:Notify", new Action<string>(NotifyPlayer));
             EventHandlers.Add("vMenu:SetClouds", new Action<float, string>(SetClouds));
             EventHandlers.Add("vMenu:SetTime", new Action<int, int, bool>(SetTime));
             EventHandlers.Add("vMenu:GoodBye", new Action(GoodBye));
             EventHandlers.Add("vMenu:SetBanList", new Action<string>(UpdateBanList));
-            EventHandlers.Add("vMenu:ClearArea", new Action<float, float, float>(ClearAreaNearPos));
+            EventHandlers.Add("vMenu:ClearArea", new Action<Vector3>(ClearAreaNearPos));
             EventHandlers.Add("vMenu:updatePedDecors", new Action(UpdatePedDecors));
             EventHandlers.Add("playerSpawned", new Action(SetAppearanceOnFirstSpawn));
-            EventHandlers.Add("vMenu:GetOutOfCar", new Action<int, int>(GetOutOfCar));
             EventHandlers.Add("vMenu:PrivateMessage", new Action<string, string>(PrivateMessage));
             EventHandlers.Add("vMenu:UpdateTeleportLocations", new Action<string>(UpdateTeleportLocations));
 
@@ -83,37 +83,6 @@ namespace vMenuClient
             {
                 Tick += TimeSync;
             }
-
-            RegisterNuiCallbackType("disableImportExportNUI");
-            RegisterNuiCallbackType("importData");
-        }
-
-        [EventHandler("sendPed")]
-        private async void sendPed(string data)
-        {
-            if (MainMenu.MiscSettingsMenu != null)
-            {
-                MainMenu.MpPedCustomizationMenu.currentCharacter = JsonConvert.DeserializeObject<MpPedDataManager.MultiplayerPedData>(data);
-                await MainMenu.MpPedCustomizationMenu.SpawnSavedPed(true);
-                await MainMenu.MpPedCustomizationMenu.SavePed();
-            }
-        }
-
-
-        [EventHandler("__cfx_nui:importData")]
-        internal void ImportData(IDictionary<string, object> data, CallbackDelegate cb)
-        {
-            SetNuiFocus(false, false);
-            Notify.Info("Debug info: This feature is not yet available, check back later.");
-            cb(JsonConvert.SerializeObject(new { ok = true }));
-        }
-
-        [EventHandler("__cfx_nui:disableImportExportNUI")]
-        internal void DisableImportExportNUI(IDictionary<string, object> data, CallbackDelegate cb)
-        {
-            SetNuiFocus(false, false);
-            Notify.Info("Debug info: Closing import/export NUI window.");
-            cb(JsonConvert.SerializeObject(new { ok = true }));
         }
 
         private bool firstSpawn = true;
@@ -151,7 +120,9 @@ namespace vMenuClient
         private void SetConfigOptions()
         {
             SetAddons();
+            SetWhiteLists();
             SetExtras();
+            SetTattoos();
 
             MainMenu.ConfigOptionsSetupComplete = true;
         }
@@ -165,6 +136,7 @@ namespace vMenuClient
             VehicleSpawner.AddonVehicles = new Dictionary<string, uint>();
             WeaponOptions.AddonWeapons = new Dictionary<string, uint>();
             PlayerAppearance.AddonPeds = new Dictionary<string, uint>();
+            MpPedCustomization.ExtraBlendableFaces = [];
 
             var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/addons.json") ?? "{}";
             try
@@ -179,7 +151,7 @@ namespace vMenuClient
                     {
                         if (!VehicleSpawner.AddonVehicles.ContainsKey(addon))
                         {
-                            VehicleSpawner.AddonVehicles.Add(addon, (uint)GetHashKey(addon));
+                            VehicleSpawner.AddonVehicles.Add(addon, Game.GenerateHashASCII(addon));
                         }
                         else
                         {
@@ -195,7 +167,7 @@ namespace vMenuClient
                     {
                         if (!WeaponOptions.AddonWeapons.ContainsKey(addon))
                         {
-                            WeaponOptions.AddonWeapons.Add(addon, (uint)GetHashKey(addon));
+                            WeaponOptions.AddonWeapons.Add(addon, Game.GenerateHashASCII(addon));
                         }
                         else
                         {
@@ -211,11 +183,26 @@ namespace vMenuClient
                     {
                         if (!PlayerAppearance.AddonPeds.ContainsKey(addon))
                         {
-                            PlayerAppearance.AddonPeds.Add(addon, (uint)GetHashKey(addon));
+                            PlayerAppearance.AddonPeds.Add(addon, Game.GenerateHashASCII(addon));
                         }
                         else
                         {
                             Debug.WriteLine($"[vMenu] [Error] Your addons.json file contains 2 or more entries with the same ped name! ({addon}) Please remove duplicate lines!");
+                        }
+                    }
+                }
+
+                if (addons.ContainsKey("extra_blendable_faces"))
+                {
+                    foreach (var addon in addons["extra_blendable_faces"])
+                    {
+                        if (!MpPedCustomization.ExtraBlendableFaces.Contains(addon))
+                        {
+                            MpPedCustomization.ExtraBlendableFaces.Add(addon);
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[vMenu] [Error] Your addons.json file contains 2 or more entries with the same extra blendable face name! ({addon}) Please remove duplicate lines!");
                         }
                     }
                 }
@@ -226,6 +213,75 @@ namespace vMenuClient
             }
         }
 
+        /// <summary>
+        /// Sets the addon models from the addons.json file.
+        /// </summary>
+        private void SetWhiteLists()
+        {
+            // reset addons
+            VehicleSpawner.WhitelistVehicles = new Dictionary<string, uint>();
+            PlayerAppearance.WhitelistedPeds = new Dictionary<string, uint>();
+            WeaponOptions.WeaponWhitelist = new Dictionary<string, uint>();
+
+            var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/model-whitelists.json") ?? "{}";
+            try
+            {
+                // load new addons.
+                var whitelists = JsonConvert.DeserializeObject<Dictionary<string, List<string>>>(jsonData);
+
+                // load whitelist vehicles
+                if (whitelists.ContainsKey("whitelistedvehicle"))
+                {
+                    foreach (var whitelist in whitelists["whitelistedvehicle"])
+                    {
+                        if (!VehicleSpawner.WhitelistVehicles.ContainsKey(whitelist))
+                        {
+                            VehicleSpawner.WhitelistVehicles.Add(whitelist, Game.GenerateHashASCII(whitelist));
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[vMenu] [Error] Your model-whitelists.json file contains 2 or more entries with the same vehicle name! ({whitelist}) Please remove duplicate lines!");
+                        }
+                    }
+                }
+
+                // load whitelisted peds.
+                if (whitelists.ContainsKey("whitelistedpeds"))
+                {
+                    foreach (var whitelist in whitelists["whitelistedpeds"])
+                    {
+                        if (!PlayerAppearance.WhitelistedPeds.ContainsKey(whitelist))
+                        {
+                            PlayerAppearance.WhitelistedPeds.Add(whitelist, Game.GenerateHashASCII(whitelist));
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[vMenu] [Error] Your model-whitelists.json file contains 2 or more entries with the same ped name! ({whitelist}) Please remove duplicate lines!");
+                        }
+                    }
+                }
+
+                // load whitelisted weapon.
+                if (whitelists.ContainsKey("whitelistedweapons"))
+                {
+                    foreach (var whitelist in whitelists["whitelistedweapons"])
+                    {
+                        if (!WeaponOptions.WeaponWhitelist.ContainsKey(whitelist))
+                        {
+                            WeaponOptions.WeaponWhitelist.Add(whitelist, Game.GenerateHashASCII(whitelist));
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[vMenu] [Error] Your model-whitelists.json file contains 2 or more entries with the same ped name! ({whitelist}) Please remove duplicate lines!");
+                        }
+                    }
+                }
+            }
+            catch (JsonReaderException ex)
+            {
+                Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your model-whitelists.json file contains a problem! Error details: {ex.Message}\n\n");
+            }
+        }
         /// <summary>
         /// Sets the extras labels from the extras.json file.
         /// </summary>
@@ -243,7 +299,7 @@ namespace vMenuClient
 
                 foreach (string model in extras.Keys)
                 {
-                    uint modelHash = (uint)GetHashKey(model);
+                    uint modelHash = Game.GenerateHashASCII(model);
 
                     if (extras[model] != null && extras[model].Count > 0)
                     {
@@ -265,6 +321,33 @@ namespace vMenuClient
             catch (JsonReaderException ex)
             {
                 Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your extras.json file contains a problem! Error details: {ex.Message}\n\n");
+            }
+        }
+
+        private void SetTattoos()
+        {
+            TattoosData.Addons = [];
+
+            var jsonData = LoadResourceFile(GetCurrentResourceName(), "config/tattoos.json") ?? "[]";
+            try
+            {
+                List<Tattoo> addons = JsonConvert.DeserializeObject<List<Tattoo>>(jsonData);
+
+                foreach (Tattoo tattoo in addons)
+                {
+                    if (!TattoosData.Addons.Exists(i => i.collectionName == tattoo.collectionName && i.name == tattoo.name))
+                    {
+                        TattoosData.Addons.Add(tattoo);
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[vMenu] [Error] Your tattoos.json file contains 2 or more entries with the same collection and tattoo names! ({tattoo.collectionName} & {tattoo.name}) Please remove duplicate lines!");
+                    }
+                }
+            }
+            catch (JsonReaderException ex)
+            {
+                Debug.WriteLine($"\n\n^1[vMenu] [ERROR] ^7Your tattoos.json file contains a problem! Error details: {ex.Message}\n\n");
             }
         }
 
@@ -387,91 +470,13 @@ namespace vMenuClient
         }
 
         /// <summary>
-        /// Teleport to the specified player.
-        /// </summary>
-        /// <param name="targetPlayer"></param>
-        private async void SummonPlayer(string targetPlayer)
-        {
-            // ensure the player list is requested in case of Infinity
-            MainMenu.PlayersList.RequestPlayerList();
-            await MainMenu.PlayersList.WaitRequested();
-
-            var player = MainMenu.PlayersList.FirstOrDefault(a => a.ServerId == int.Parse(targetPlayer));
-
-            if (player != null)
-            {
-                _ = TeleportToPlayer(player);
-            }
-        }
-
-        /// <summary>
         /// Clear the area around the provided x, y, z coordinates. Clears everything like (destroyed) objects, peds, (ai) vehicles, etc.
         /// Also restores broken streetlights, etc.
         /// </summary>
         /// <param name="x"></param>
         /// <param name="y"></param>
         /// <param name="z"></param>
-        private void ClearAreaNearPos(float x, float y, float z)
-        {
-            ClearAreaOfEverything(x, y, z, 100f, false, false, false, false);
-        }
-
-        /// <summary>
-        /// Kicks the current player from the specified vehicle if they're inside and don't own the vehicle themselves.
-        /// </summary>
-        /// <param name="vehNetId"></param>
-        /// <param name="vehicleOwnedBy"></param>
-        private async void GetOutOfCar(int vehNetId, int vehicleOwnedBy)
-        {
-            if (NetworkDoesNetworkIdExist(vehNetId))
-            {
-                var veh = NetToVeh(vehNetId);
-                if (DoesEntityExist(veh))
-                {
-                    var vehicle = new Vehicle(veh);
-
-                    if (vehicle == null || !vehicle.Exists())
-                    {
-                        return;
-                    }
-
-                    if (Game.PlayerPed.IsInVehicle(vehicle) && vehicleOwnedBy != Game.Player.ServerId)
-                    {
-                        if (!vehicle.IsStopped)
-                        {
-                            Notify.Alert("The owner of this vehicle is reclaiming their personal vehicle. You will be kicked from this vehicle in about 10 seconds. Stop the vehicle now to avoid taking damage.", false, true);
-                        }
-
-                        // Wait for the vehicle to come to a stop, or 10 seconds, whichever is faster.
-                        var timer = GetGameTimer();
-                        while (vehicle != null && vehicle.Exists() && !vehicle.IsStopped)
-                        {
-                            await Delay(0);
-                            if (GetGameTimer() - timer > (10 * 1000)) // 10 second timeout
-                            {
-                                break;
-                            }
-                        }
-
-                        // just to make sure they're actually still inside the vehicle and the vehicle still exists.
-                        if (vehicle != null && vehicle.Exists() && Game.PlayerPed.IsInVehicle(vehicle))
-                        {
-                            // Make the ped jump out because the car isn't stopped yet.
-                            if (!vehicle.IsStopped)
-                            {
-                                Notify.Info("You were warned, now you'll have to suffer the consequences!");
-                                TaskLeaveVehicle(Game.PlayerPed.Handle, vehicle.Handle, 4160);
-                            }
-                            // Make the ped exit gently.
-                            else
-                            {
-                                TaskLeaveVehicle(Game.PlayerPed.Handle, vehicle.Handle, 0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        private void ClearAreaNearPos(Vector3 position) => ClearAreaOfEverything(position.X, position.Y, position.Z, 100f, false, false, false, false);
 
         /// <summary>
         /// Updates ped decorators for the clothing animation when players have joined.
