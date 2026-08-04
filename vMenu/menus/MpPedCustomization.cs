@@ -329,7 +329,7 @@ namespace vMenuClient.menus
             var currentMakeupOpacity = editPed ? currentCharacter.PedAppearance.makeupOpacity : 0f;
             var currentMakeupColor = editPed ? currentCharacter.PedAppearance.makeupColor : 0;
             SetPedHeadOverlay(Game.PlayerPed.Handle, 4, currentMakeupStyle, currentMakeupOpacity);
-            SetPedHeadOverlayColor(Game.PlayerPed.Handle, 4, 2, currentMakeupColor, currentMakeupColor);
+            /*SetPedHeadOverlayColor(Game.PlayerPed.Handle, 4, 2, currentMakeupColor, currentMakeupColor);*/
 
             // 5 blush
             var currentBlushStyle = editPed ? currentCharacter.PedAppearance.blushStyle : GetPedHeadOverlayValue(Game.PlayerPed.Handle, 5) != 255 ? GetPedHeadOverlayValue(Game.PlayerPed.Handle, 5) : 0;
@@ -403,7 +403,7 @@ namespace vMenuClient.menus
             var makeupStyle = new MenuListItem("Makeup Style", makeupStyleList, currentMakeupStyle, "Select a makeup style.");
             var makeupOpacity = new MenuListItem("Makeup Opacity", opacity, (int)(currentMakeupOpacity * 10f), "Select a makeup opacity") { ShowOpacityPanel = true };
             //MenuSliderItem makeupOpacity = new MenuSliderItem("Makeup Opacity", 0, 10, (int)(currentMakeupOpacity * 10f), "Select a makeup opacity.");
-            var makeupColor = new MenuListItem("Makeup Color", overlayColorsList, currentMakeupColor, "Select a makeup color.") { ShowColorPanel = true, ColorPanelColorType = MenuListItem.ColorPanelType.Makeup };
+            /* var makeupColor = new MenuListItem("Makeup Color", overlayColorsList, currentMakeupColor, "Select a makeup color.") { ShowColorPanel = true, ColorPanelColorType = MenuListItem.ColorPanelType.Makeup };*/
 
             var blushStyle = new MenuListItem("Blush Style", blushStyleList, currentBlushStyle, "Select a blush style.");
             var blushOpacity = new MenuListItem("Blush Opacity", opacity, (int)(currentBlushOpacity * 10f), "Select a blush opacity.") { ShowOpacityPanel = true };
@@ -458,7 +458,7 @@ namespace vMenuClient.menus
 
             appearanceMenu.AddMenuItem(makeupStyle);
             appearanceMenu.AddMenuItem(makeupOpacity);
-            appearanceMenu.AddMenuItem(makeupColor);
+            /*appearanceMenu.AddMenuItem(makeupColor);*/
 
             appearanceMenu.AddMenuItem(blushStyle);
             appearanceMenu.AddMenuItem(blushOpacity);
@@ -1218,53 +1218,49 @@ namespace vMenuClient.menus
                             currentCharacter.PedAppearance.makeupStyle = selection;
                             currentCharacter.PedAppearance.makeupOpacity = opacity;
                             break;
-                        case 15: // makeup color
-                            SetPedHeadOverlayColor(Game.PlayerPed.Handle, 4, 2, selection, selection);
-                            currentCharacter.PedAppearance.makeupColor = selection;
-                            break;
-                        case 16: // blush style
+                        case 15: // blush style
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 5, selection, opacity);
                             currentCharacter.PedAppearance.blushStyle = selection;
                             currentCharacter.PedAppearance.blushOpacity = opacity;
                             break;
-                        case 18: // blush color
+                        case 17: // blush color
                             SetPedHeadOverlayColor(Game.PlayerPed.Handle, 5, 2, selection, selection);
                             currentCharacter.PedAppearance.blushColor = selection;
                             break;
-                        case 19: // complexion
+                        case 18: // complexion
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 6, selection, opacity);
                             currentCharacter.PedAppearance.complexionStyle = selection;
                             currentCharacter.PedAppearance.complexionOpacity = opacity;
                             break;
-                        case 21: // sun damage
+                        case 20: // sun damage
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 7, selection, opacity);
                             currentCharacter.PedAppearance.sunDamageStyle = selection;
                             currentCharacter.PedAppearance.sunDamageOpacity = opacity;
                             break;
-                        case 23: // lipstick
+                        case 22: // lipstick
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 8, selection, opacity);
                             currentCharacter.PedAppearance.lipstickStyle = selection;
                             currentCharacter.PedAppearance.lipstickOpacity = opacity;
                             break;
-                        case 25: // lipstick color
+                        case 24: // lipstick color
                             SetPedHeadOverlayColor(Game.PlayerPed.Handle, 8, 2, selection, selection);
                             currentCharacter.PedAppearance.lipstickColor = selection;
                             break;
-                        case 26: // moles and freckles
+                        case 25: // moles and freckles
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 9, selection, opacity);
                             currentCharacter.PedAppearance.molesFrecklesStyle = selection;
                             currentCharacter.PedAppearance.molesFrecklesOpacity = opacity;
                             break;
-                        case 28: // chest hair
+                        case 27: // chest hair
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 10, selection, opacity);
                             currentCharacter.PedAppearance.chestHairStyle = selection;
                             currentCharacter.PedAppearance.chestHairOpacity = opacity;
                             break;
-                        case 30: // chest hair color
+                        case 29: // chest hair color
                             SetPedHeadOverlayColor(Game.PlayerPed.Handle, 10, 1, selection, selection);
                             currentCharacter.PedAppearance.chestHairColor = selection;
                             break;
-                        case 31: // body blemishes
+                        case 30: // body blemishes
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 11, selection, opacity);
                             currentCharacter.PedAppearance.bodyBlemishesStyle = selection;
                             currentCharacter.PedAppearance.bodyBlemishesOpacity = opacity;
@@ -1325,37 +1321,37 @@ namespace vMenuClient.menus
                             currentCharacter.PedAppearance.makeupStyle = selection;
                             currentCharacter.PedAppearance.makeupOpacity = opacity;
                             break;
-                        case 17: // blush style
+                        case 16: // blush style
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 5, selection, opacity);
                             currentCharacter.PedAppearance.blushStyle = selection;
                             currentCharacter.PedAppearance.blushOpacity = opacity;
                             break;
-                        case 20: // complexion
+                        case 19: // complexion
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 6, selection, opacity);
                             currentCharacter.PedAppearance.complexionStyle = selection;
                             currentCharacter.PedAppearance.complexionOpacity = opacity;
                             break;
-                        case 22: // sun damage
+                        case 21: // sun damage
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 7, selection, opacity);
                             currentCharacter.PedAppearance.sunDamageStyle = selection;
                             currentCharacter.PedAppearance.sunDamageOpacity = opacity;
                             break;
-                        case 24: // lipstick
+                        case 23: // lipstick
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 8, selection, opacity);
                             currentCharacter.PedAppearance.lipstickStyle = selection;
                             currentCharacter.PedAppearance.lipstickOpacity = opacity;
                             break;
-                        case 27: // moles and freckles
+                        case 26: // moles and freckles
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 9, selection, opacity);
                             currentCharacter.PedAppearance.molesFrecklesStyle = selection;
                             currentCharacter.PedAppearance.molesFrecklesOpacity = opacity;
                             break;
-                        case 29: // chest hair
+                        case 28: // chest hair
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 10, selection, opacity);
                             currentCharacter.PedAppearance.chestHairStyle = selection;
                             currentCharacter.PedAppearance.chestHairOpacity = opacity;
                             break;
-                        case 32: // body blemishes
+                        case 31: // body blemishes
                             SetPedHeadOverlay(Game.PlayerPed.Handle, 11, selection, opacity);
                             currentCharacter.PedAppearance.bodyBlemishesStyle = selection;
                             currentCharacter.PedAppearance.bodyBlemishesOpacity = opacity;
@@ -3381,7 +3377,7 @@ namespace vMenuClient.menus
             SetPedHeadOverlay(pedHandle, 3, appData.ageingStyle, appData.ageingOpacity);
             // makeup
             SetPedHeadOverlay(pedHandle, 4, appData.makeupStyle, appData.makeupOpacity);
-            SetPedHeadOverlayColor(pedHandle, 4, 2, appData.makeupColor, appData.makeupColor);
+            /*SetPedHeadOverlayColor(pedHandle, 4, 2, appData.makeupColor, appData.makeupColor);*/
             // blush
             SetPedHeadOverlay(pedHandle, 5, appData.blushStyle, appData.blushOpacity);
             SetPedHeadOverlayColor(pedHandle, 5, 2, appData.blushColor, appData.blushColor);
